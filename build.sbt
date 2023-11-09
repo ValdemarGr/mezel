@@ -1,5 +1,7 @@
 val scala213Version = "2.13.12"
 
+enablePlugins(GraalVMNativeImagePlugin)
+
 ThisBuild / scalaVersion := scala213Version
 ThisBuild / crossScalaVersions := Seq(scala213Version, "3.3.0")
 ThisBuild / organization := "io.github.valdemargr"
@@ -8,11 +10,20 @@ ThisBuild / tlBaseVersion := "0.0"
 ThisBuild / tlUntaggedAreSnapshots := false
 ThisBuild / tlSonatypeUseLegacyHost := true
 
-ThisBuild / licenses := List("Apache-2.0" -> url("http://www.apache.org/licenses/LICENSE-2.0"))
-ThisBuild / developers := List(
-  Developer("valdemargr", "Valdemar Grange", "randomvald0069@gmail.com", url("https://github.com/valdemargr"))
+ThisBuild / licenses := List(
+  "Apache-2.0" -> url("http://www.apache.org/licenses/LICENSE-2.0")
 )
-ThisBuild / headerLicense := Some(HeaderLicense.Custom("Copyright (c) 2023 Valdemar Grange"))
+ThisBuild / developers := List(
+  Developer(
+    "valdemargr",
+    "Valdemar Grange",
+    "randomvald0069@gmail.com",
+    url("https://github.com/valdemargr")
+  )
+)
+ThisBuild / headerLicense := Some(
+  HeaderLicense.Custom("Copyright (c) 2023 Valdemar Grange")
+)
 ThisBuild / headerEmptyLine := false
 
 lazy val sharedSettings = Seq(
@@ -24,6 +35,10 @@ lazy val sharedSettings = Seq(
   mimaReportSignatureProblems := false,
   mimaFailOnProblem := false,
   mimaPreviousArtifacts := Set.empty,
+  graalVMNativeImageOptions ++= Seq(
+    "--initialize-at-build-time",
+    "--no-fallback"
+  ),
   scalacOptions ++= {
     if (scalaVersion.value.startsWith("2")) {
       Seq(
