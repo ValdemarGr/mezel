@@ -1,9 +1,6 @@
-val scala213Version = "2.13.12"
-
 enablePlugins(GraalVMNativeImagePlugin)
 
-ThisBuild / scalaVersion := scala213Version
-ThisBuild / crossScalaVersions := Seq(scala213Version, "3.3.0")
+ThisBuild / scalaVersion := "3.3.1"
 ThisBuild / organization := "io.github.valdemargr"
 
 ThisBuild / tlBaseVersion := "0.0"
@@ -35,10 +32,6 @@ lazy val sharedSettings = Seq(
   mimaReportSignatureProblems := false,
   mimaFailOnProblem := false,
   mimaPreviousArtifacts := Set.empty,
-  graalVMNativeImageOptions ++= Seq(
-    "--initialize-at-build-time",
-    "--no-fallback"
-  ),
   scalacOptions ++= {
     if (scalaVersion.value.startsWith("2")) {
       Seq(
@@ -51,6 +44,9 @@ lazy val sharedSettings = Seq(
   libraryDependencies ++= Seq(
     "org.typelevel" %% "cats-effect" % "3.5.2",
     "org.typelevel" %% "cats-core" % "2.9.0",
+    "org.typelevel" %% "cats-parse" % "0.3.8",
+    "io.circe" %% "circe-core" % "0.14.6",
+    "io.circe" %% "circe-parser" % "0.14.6",
     "co.fs2" %% "fs2-core" % "3.9.3",
     "co.fs2" %% "fs2-io" % "3.9.3",
     "org.tpolecat" %% "sourcepos" % "1.1.0",
@@ -62,4 +58,23 @@ lazy val sharedSettings = Seq(
 lazy val root = project
   .in(file("."))
   .settings(sharedSettings)
-  .settings(name := "mezel")
+  .settings(
+    name := "mezel",
+    fork := true,
+    graalVMNativeImageOptions ++= Seq(
+      "--initialize-at-build-time",
+      "--no-fallback"
+    ),
+  )
+
+lazy val dev = project
+  .in(file("dev"))
+  .settings(sharedSettings)
+  .settings(
+    name := "mezel",
+    fork := true,
+    graalVMNativeImageOptions ++= Seq(
+      "--initialize-at-build-time",
+      "--no-fallback"
+    )
+  ).enablePlugins(GraalVMNativeImagePlugin)

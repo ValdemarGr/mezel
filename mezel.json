@@ -1,0 +1,7 @@
+{
+  "name": "Mezel",
+  "version": "1.0.0",
+  "bspVersion": "2.0.0",
+  "languages": ["scala"],
+  "argv": ["/home/valde/git/mezel/script.sh"]
+}
