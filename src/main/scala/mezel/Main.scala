@@ -1,5 +1,6 @@
 package mezel
 
+import cats.implicits.*
 import io.circe.parser.*
 import io.circe.*
 import fs2.*
@@ -7,7 +8,10 @@ import cats.effect.*
 import fs2.io.file.*
 import cats.parse.Parser as P
 import cats.parse.Parser0 as P0
+import cats.parse.Rfc5234 as Rfc
+import cats.parse.Numbers as Num
 import _root_.io.circe.Json
+import cats.Eval
 
 object Main extends IOApp.Simple {
 
@@ -47,6 +51,104 @@ object Main extends IOApp.Simple {
     //   .drain
   }
 }
+
+enum ParserState:
+  case NoState
+  case ContentLength(len: Int)
+
+final case class ParserContent(
+    state: ParserState,
+    content: String
+)
+
+def jsonRpcParser: Pipe[IO, String, Json] = { stream =>
+  def produce(pc: ParserContent): Either[String, Option[(Option[Json], ParserContent)]] = {
+    def p[A](p: P[A]) = p.parse(pc.content).toOption
+
+    val nlParser = Rfc.crlf | Rfc.lf | Rfc.cr
+
+    val nl = p(nlParser)
+
+    val cl = p(
+      P.string(
+        "Content-Length:"
+      ) *> Rfc.wsp.rep0 *> Num.bigInt
+    )
+
+    val ct = p((P.string("Content-Type:") *> Rfc.wsp.rep0).void)
+
+    val headers =
+      nl.map { case (x, _) => Right(pc.copy(content = x)) } orElse
+        cl.map { case (x, cl) =>
+          pc.state match {
+            case ParserState.ContentLength(_) => Left("Content-Length after Content-Length")
+            case ParserState.NoState          => Right(ParserContent(ParserState.ContentLength(cl.toInt), x))
+          }
+        } orElse
+        ct.map { case (x, _) => Right(pc.copy(content = x)) }
+
+    val parsedHeaders: Either[String, Option[ParserContent]] = headers.sequence
+
+    val out: Either[String, Option[(Option[Json], ParserContent)]] = parsedHeaders.flatMap {
+      case Some(x) => Right(Some((None, x)))
+      case None =>
+        pc.state match {
+          case ParserState.ContentLength(len) if pc.content.length >= len =>
+            val (content, rest) = pc.content.splitAt(len)
+            val json: Either[ParsingFailure, Json] = _root_.io.circe.parser.parse(content)
+            json.leftMap(_.getMessage).map(x => Some((Some(x), ParserContent(ParserState.NoState, rest))))
+          case ParserState.ContentLength(_) | ParserState.NoState => Right(None)
+        }
+    }
+
+    out
+  }
+
+  def unroll(pc: ParserContent): Eval[Either[String, (List[Json], ParserContent)]] = Eval.defer {
+    produce(pc).flatTraverse {
+      case Some((j, pc)) => unroll(pc).map(_.map { case (j2, pc2) => (j.toList ++ j2.toList, pc2) })
+      case None          => Eval.now(Right((Nil, pc)))
+    }
+  }
+
+  val parsedStream =
+    stream.evalMapAccumulate(ParserContent(ParserState.NoState, "")) { case (z, x) =>
+      val pc = z.copy(content = z.content + x)
+
+      val io = IO.fromEither(unroll(pc).value.leftMap(x => new RuntimeException(x)))
+      io.map(_.swap)
+    }
+
+  parsedStream.flatMap { case (_, xs) => Stream.emits(xs) }
+}
+
+final case class RpcId(value: String | Int) extends AnyVal
+object RpcId:
+  given Decoder[RpcId] = (Decoder[String] or Decoder[String]).map(RpcId(_))
+  given Encoder[RpcId] = Encoder.instance[RpcId] {
+    case RpcId(value: String) => Encoder[String].apply(value)
+    case RpcId(value: Int)    => Encoder[Int].apply(value)
+  }
+
+final case class Request(
+    jsonrpc: String,
+    id: Option[RpcId],
+    method: String,
+    params: Option[Json]
+) derives Codec.AsObject
+
+final case class Response(
+    jsonrpc: String,
+    id: Option[RpcId],
+    result: Option[Json],
+    error: Option[ResponseError]
+) derives Codec.AsObject
+
+final case class ResponseError(
+    code: Int,
+    message: String,
+    data: Option[Json]
+) derives Codec.AsObject
 
 final case class SafeUri(value: String) extends AnyVal
 object SafeUri:
@@ -351,7 +453,7 @@ final case class TaskProgressParams(
     unit: Option[String],
     dataKind: Option[String],
     data: Option[Json]
-)
+) derives Codec.AsObject
 
 final case class TaskFinishParams(
     taskId: TaskId,
@@ -361,7 +463,7 @@ final case class TaskFinishParams(
     status: StatusCode,
     dataKind: Option[TaskFinishDataKind],
     data: Option[Json]
-)
+) derives Codec.AsObject
 
 enum TaskFinishDataKind:
   case CompileReport
@@ -388,7 +490,7 @@ final case class CompileReport(
     warnings: Int,
     time: Option[Long],
     noOp: Option[Boolean]
-)
+) derives Codec.AsObject
 
 final case class TestFinish(
     displayName: String,
@@ -397,7 +499,7 @@ final case class TestFinish(
     location: Option[Location],
     dataKind: Option[String],
     data: Option[Json]
-)
+) derives Codec.AsObject
 
 enum TestStatus:
   case Passed
