@@ -12,6 +12,7 @@ import cats.parse.Rfc5234 as Rfc
 import cats.parse.Numbers as Num
 import _root_.io.circe.Json
 import cats.Eval
+import cats.data.OptionT
 
 object Main extends IOApp.Simple {
 
@@ -62,61 +63,60 @@ final case class ParserContent(
 )
 
 def jsonRpcParser: Pipe[IO, String, Json] = { stream =>
-  def produce(pc: ParserContent): Either[String, Option[(Option[Json], ParserContent)]] = {
-    def p[A](p: P[A]) = p.parse(pc.content).toOption
+  final case class Output(
+      data: Option[Json],
+      newContent: ParserContent
+  )
+  type Effect[A] = OptionT[Either[String, *], A]
+  def produce(pc: ParserContent): Effect[Output] = {
+    def p[A](p: P[A]): Effect[(String, A)] =
+      OptionT.fromOption(p.parse(pc.content).toOption)
 
     val nlParser = Rfc.crlf | Rfc.lf | Rfc.cr
 
     val nl = p(nlParser)
 
-    val cl = p(
-      P.string(
-        "Content-Length:"
-      ) *> Rfc.wsp.rep0 *> Num.bigInt
-    )
+    val cl = p(P.string("Content-Length:") *> Rfc.wsp.rep0 *> Num.bigInt <* nlParser)
 
-    val ct = p((P.string("Content-Type:") *> Rfc.wsp.rep0).void)
+    val ct = p((P.string("Content-Type:") *> Rfc.wsp.rep0 <* nlParser).void)
 
-    val headers =
-      nl.map { case (x, _) => Right(pc.copy(content = x)) } orElse
-        cl.map { case (x, cl) =>
+    val headers: Effect[ParserContent] =
+      nl.map { case (x, _) => pc.copy(content = x) } orElse
+        cl.semiflatMap { case (x, cl) =>
           pc.state match {
             case ParserState.ContentLength(_) => Left("Content-Length after Content-Length")
             case ParserState.NoState          => Right(ParserContent(ParserState.ContentLength(cl.toInt), x))
           }
         } orElse
-        ct.map { case (x, _) => Right(pc.copy(content = x)) }
+        ct.map { case (x, _) => pc.copy(content = x) }
 
-    val parsedHeaders: Either[String, Option[ParserContent]] = headers.sequence
-
-    val out: Either[String, Option[(Option[Json], ParserContent)]] = parsedHeaders.flatMap {
-      case Some(x) => Right(Some((None, x)))
-      case None =>
+    headers.map(Output(none, _)).orElse {
+      if pc.content.isEmpty then OptionT.none
+      else if pc.content.startsWith("{") || pc.content.startsWith("[") then
         pc.state match {
           case ParserState.ContentLength(len) if pc.content.length >= len =>
             val (content, rest) = pc.content.splitAt(len)
             val json: Either[ParsingFailure, Json] = _root_.io.circe.parser.parse(content)
-            json.leftMap(_.getMessage).map(x => Some((Some(x), ParserContent(ParserState.NoState, rest))))
-          case ParserState.ContentLength(_) | ParserState.NoState => Right(None)
+            OptionT.liftF {
+              json.leftMap(_.getMessage).map(x => Output(Some(x), ParserContent(ParserState.NoState, rest)))
+            }
+          case ParserState.ContentLength(_) | ParserState.NoState => OptionT.none
         }
+      else OptionT.liftF(Left(s"Unknown content, state is $pc"))
     }
-
-    out
   }
 
-  def unroll(pc: ParserContent): Eval[Either[String, (List[Json], ParserContent)]] = Eval.defer {
-    produce(pc).flatTraverse {
-      case Some((j, pc)) => unroll(pc).map(_.map { case (j2, pc2) => (j.toList ++ j2.toList, pc2) })
-      case None          => Eval.now(Right((Nil, pc)))
+  def unroll(pc: ParserContent): IO[(List[Json], ParserContent)] = {
+    val io: IO[Option[Output]] = IO.fromEither(produce(pc).value.leftMap(x => new RuntimeException(x)))
+    io.flatMap {
+      case Some(o) => unroll(o.newContent).map { case (j2, pc2) => (o.data.toList ++ j2.toList, pc2) }
+      case None    => IO.pure((Nil, pc))
     }
   }
 
   val parsedStream =
     stream.evalMapAccumulate(ParserContent(ParserState.NoState, "")) { case (z, x) =>
-      val pc = z.copy(content = z.content + x)
-
-      val io = IO.fromEither(unroll(pc).value.leftMap(x => new RuntimeException(x)))
-      io.map(_.swap)
+      unroll(z.copy(content = z.content + x)).map(_.swap)
     }
 
   parsedStream.flatMap { case (_, xs) => Stream.emits(xs) }
