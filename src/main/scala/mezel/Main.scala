@@ -430,4 +430,4 @@ final case class TestReport(
     cancelled: Int,
     skipped: Int,
     time: Option[Long]
-)
+) derives Codec.AsObject
