@@ -18,47 +18,6 @@ import fs2.concurrent.SignallingRef
 import catcheffect.*
 
 object Main extends IOApp.Simple {
-  /*
-Result: {
-  "displayName": "bloop",
-  "version": "1.5.8",
-  "bspVersion": "2.1.0-M5",
-  "capabilities": {
-    "compileProvider": {
-      "languageIds": [
-        "scala",
-        "java"
-      ]
-    },
-    "testProvider": {
-      "languageIds": [
-        "scala",
-        "java"
-      ]
-    },
-    "runProvider": {
-      "languageIds": [
-        "scala",
-        "java"
-      ]
-    },
-    "debugProvider": {
-      "languageIds": [
-        "scala",
-        "java"
-      ]
-    },
-    "inverseSourcesProvider": true,
-    "dependencySourcesProvider": true,
-    "resourcesProvider": true,
-    "buildTargetChangedProvider": false,
-    "jvmRunEnvironmentProvider": true,
-    "jvmTestEnvironmentProvider": true,
-    "canReload": false
-  }
-}
-   */
-
   final case class BspState(
       workspaceUri: Option[SafeUri]
   )
