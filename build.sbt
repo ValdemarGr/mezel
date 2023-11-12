@@ -67,6 +67,12 @@ lazy val root = project
       "--initialize-at-build-time",
       "--no-fallback"
     ),
+    Compile / PB.targets := Seq(
+      scalapb.gen(scala3Sources = true) -> (Compile / sourceManaged).value / "scalapb"
+    ),
+    libraryDependencies ++= Seq(
+      "com.thesamet.scalapb" %% "scalapb-runtime" % scalapb.compiler.Version.scalapbVersion % "protobuf"
+    )
   )
 
 lazy val dev = project

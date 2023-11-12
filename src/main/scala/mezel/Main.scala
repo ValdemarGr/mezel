@@ -1,5 +1,7 @@
 package mezel
 
+import com.google.devtools.build.lib.query2.proto.proto2api.build
+import com.google.devtools.build.lib.analysis.analysis_v2
 import cats.implicits.*
 import io.circe.parser.*
 import io.circe.*
