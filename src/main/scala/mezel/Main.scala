@@ -11,12 +11,32 @@ import cats.parse.Parser0 as P0
 import cats.parse.Rfc5234 as Rfc
 import cats.parse.Numbers as Num
 import _root_.io.circe.Json
-import cats.Eval
-import cats.data.OptionT
+import cats.data.*
 
 object Main extends IOApp.Simple {
 
   def run: IO[Unit] = {
+    Files[IO]
+      .readAll(Path("/tmp/from-metals"))
+      .through(fs2.text.utf8.decode)
+      .through(jsonRpcRequests)
+      .map{ x =>
+        x.method match {
+          case "build/initialize" => ???
+          case "workspace/buildTargets" => ???
+          case "buildTarget/scalacOptions" => ???
+          case "buildTarget/javacOptions" => ???
+          case "buildTarget/sources" => ???
+          case "buildTarget/dependencySources" => ???
+          case "buildTarget/scalaMainClasses" => ???
+          case "buildTarget/jvmRunEnvironment" => ???
+          case "buildTarget/scalaTestClasses" => ???
+          case "buildTarget/compile" => ???
+          case "build/taskStart" => ???
+          case "build/taskProgress" => ???
+        }
+      }
+
     val content = _root_.io.circe.parser
       .parse("""{
   "jsonrpc": "2.0",
@@ -61,6 +81,10 @@ final case class ParserContent(
     state: ParserState,
     content: String
 )
+
+def jsonRpcRequests: Pipe[IO, String, Request] = _.through(jsonRpcParser)
+  .map(_.as[Request])
+  .rethrow
 
 def jsonRpcParser: Pipe[IO, String, Json] = { stream =>
   final case class Output(
