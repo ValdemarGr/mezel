@@ -22,20 +22,27 @@ import alleycats.*
 import fs2.io.process.*
 import scalapb._
 
-object BazelAPI:
-  def builder(args: String*) = ProcessBuilder("bazel", "--noshow_progress" :: "--show-result=0" :: args.toList)
+class BazelAPI(rootDir: Path):
+  def builder(cmd: String, args: String*) = {
+    ProcessBuilder("bazel", cmd :: "--noshow_loading_progress" :: "--noshow_progress" :: args.toList)
+      .withWorkingDirectory(rootDir)
+  }
 
-  def runAndParse[A <: GeneratedMessage](args: String*)(implicit ev: GeneratedMessageCompanion[A]): IO[A] =
-    builder(args*)
+  def runAndParse[A <: GeneratedMessage](cmd: String, args: String*)(implicit ev: GeneratedMessageCompanion[A]): IO[A] = {
+    builder(cmd, args*)
       .spawn[IO]
       .use: proc =>
         fs2.io
           .toInputStreamResource(proc.stdout)
           .use: is =>
             IO.interruptibleMany(ev.parseFrom(is))
+  }
 
   def query(q: Query): IO[build.QueryResult] =
-    runAndParse[build.QueryResult]("query", q.render)
+    runAndParse[build.QueryResult]("query", q.render, "--output=proto")
 
   def aquery(q: Query): IO[analysis_v2.ActionGraphContainer] =
-    runAndParse[analysis_v2.ActionGraphContainer]("aquery", q.render)
+    runAndParse[analysis_v2.ActionGraphContainer]("aquery", q.render, "--output=proto")
+
+  // def build(targets: List[String]): IO[build.BuildEventStreamResponse] =
+  //   runAndParse[build.BuildEventStreamResponse]("build", targets*)

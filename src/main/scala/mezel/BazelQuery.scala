@@ -65,7 +65,7 @@ object dsl:
   def allPaths(s: Query | String, e: Query | String): Query =
     Query.AllPaths(unify(s), unify(e))
 
-  def kind(w: String, input: Query | String): Query =
+  def kind(w: String)(input: Query | String): Query =
     Query.Kind(Query.Word(w), unify(input))
 
   def filter(w: String, input: Query | String): Query =
@@ -92,7 +92,7 @@ object dsl:
   def loadfiles(input: Query | String): Query =
     Query.Loadfiles(unify(input))
 
-  def let(name: String, value: Query | String, in: Query | String): Query =
+  def let(name: String)(value: Query | String)(in: Query | String): Query =
     Query.Let(name, unify(value), unify(in))
 
   def parens(q: Query | String): Query =
@@ -101,10 +101,10 @@ object dsl:
   def intersect(left: Query | String, right: Query | String): Query =
     Query.Binary(unify(left), BinOp.Intersect, unify(right))
 
-  def union(left: Query | String, right: Query | String): Query =
+  def union(left: Query | String)(right: Query | String): Query =
     Query.Binary(unify(left), BinOp.Union, unify(right))
 
-  def except(left: Query | String, right: Query | String): Query =
+  def except(left: Query | String)(right: Query | String): Query =
     Query.Binary(unify(left), BinOp.Except, unify(right))
 
   def set(qs: List[Query | String]): Query =
