@@ -1,5 +1,21 @@
 {
   "nodes": {
+    "bazel-repo": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1699655275,
+        "narHash": "sha256-i+zDwh00VpOI5M/lbdECD8k13macQKJANgtQqIX9lEA=",
+        "owner": "bazelbuild",
+        "repo": "bazel",
+        "rev": "f906d02543f83d9aee914f72bf89e51c293c2506",
+        "type": "github"
+      },
+      "original": {
+        "owner": "bazelbuild",
+        "repo": "bazel",
+        "type": "github"
+      }
+    },
     "flake-utils": {
       "inputs": {
         "systems": "systems"
@@ -35,6 +51,7 @@
     },
     "root": {
       "inputs": {
+        "bazel-repo": "bazel-repo",
         "flake-utils": "flake-utils",
         "nixpkgs": "nixpkgs"
       }
