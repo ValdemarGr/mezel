@@ -52,6 +52,7 @@ lazy val sharedSettings = Seq(
     "co.fs2" %% "fs2-io" % "3.9.3",
     "org.tpolecat" %% "sourcepos" % "1.1.0",
     "io.github.valdemargr" %% "catch-effect" % "0.0.1",
+    "org.typelevel" %% "kittens" % "3.1.0",
     "org.scalameta" %% "munit" % "1.0.0-M10" % Test,
     "org.typelevel" %% "munit-cats-effect" % "2.0.0-M3" % Test
   )
