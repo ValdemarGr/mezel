@@ -44,5 +44,5 @@ class BazelAPI(rootDir: Path):
   def aquery(q: Query): IO[analysis_v2.ActionGraphContainer] =
     runAndParse[analysis_v2.ActionGraphContainer]("aquery", q.render, "--output=proto")
 
-  // def build(targets: List[String]): IO[build.BuildEventStreamResponse] =
-  //   runAndParse[build.BuildEventStreamResponse]("build", targets*)
+  def runBuild(targets: String*): IO[Int] =
+    builder("build", targets*).spawn[IO].use(_.exitValue)

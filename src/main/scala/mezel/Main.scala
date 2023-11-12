@@ -95,12 +95,14 @@ object Main extends IOApp.Simple {
 
     import dsl.*
     BazelAPI(Path("."))
-      .query {
+      .aquery {
         kind("scala_library") {
           deps("//...")
         }
       }
       .flatMap(x => IO(println(x)))
+
+    BazelAPI(Path(".")).runBuild("//...").flatMap(x => IO(println(x)))
   }
 }
 
