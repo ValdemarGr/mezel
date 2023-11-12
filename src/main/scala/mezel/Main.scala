@@ -12,30 +12,164 @@ import cats.parse.Rfc5234 as Rfc
 import cats.parse.Numbers as Num
 import _root_.io.circe.Json
 import cats.data.*
+import fs2.concurrent.SignallingRef
+import catcheffect.*
 
 object Main extends IOApp.Simple {
+  /*
+Result: {
+  "displayName": "bloop",
+  "version": "1.5.8",
+  "bspVersion": "2.1.0-M5",
+  "capabilities": {
+    "compileProvider": {
+      "languageIds": [
+        "scala",
+        "java"
+      ]
+    },
+    "testProvider": {
+      "languageIds": [
+        "scala",
+        "java"
+      ]
+    },
+    "runProvider": {
+      "languageIds": [
+        "scala",
+        "java"
+      ]
+    },
+    "debugProvider": {
+      "languageIds": [
+        "scala",
+        "java"
+      ]
+    },
+    "inverseSourcesProvider": true,
+    "dependencySourcesProvider": true,
+    "resourcesProvider": true,
+    "buildTargetChangedProvider": false,
+    "jvmRunEnvironmentProvider": true,
+    "jvmTestEnvironmentProvider": true,
+    "canReload": false
+  }
+}
+   */
 
-  def run: IO[Unit] = {
-    Files[IO]
-      .readAll(Path("/tmp/from-metals"))
-      .through(fs2.text.utf8.decode)
-      .through(jsonRpcRequests)
-      .map{ x =>
-        x.method match {
-          case "build/initialize" => ???
-          case "workspace/buildTargets" => ???
-          case "buildTarget/scalacOptions" => ???
-          case "buildTarget/javacOptions" => ???
-          case "buildTarget/sources" => ???
-          case "buildTarget/dependencySources" => ???
-          case "buildTarget/scalaMainClasses" => ???
-          case "buildTarget/jvmRunEnvironment" => ???
-          case "buildTarget/scalaTestClasses" => ???
-          case "buildTarget/compile" => ???
-          case "build/taskStart" => ???
-          case "build/taskProgress" => ???
+  final case class BspState(
+      workspaceUri: Option[SafeUri]
+  )
+
+  object BspState {
+    val empty: BspState = BspState(None)
+  }
+
+  enum BspResponseError(val code: Int, val message: String, val data: Option[Json] = None):
+    case NotInitialized extends BspResponseError(-32002, "Server not initialized")
+
+  class BspServerOps(state: SignallingRef[IO, BspState])(implicit R: Raise[IO, BspResponseError]) {
+    import _root_.io.circe.syntax.*
+
+    def get[A](f: BspState => Option[A])(err: BspState => BspResponseError): IO[A] =
+      state.get.flatMap(s => R.fromOption(err(s))(f(s)))
+
+    def workspaceUri: IO[SafeUri] =
+      get(_.workspaceUri)(_ => BspResponseError.NotInitialized)
+
+    def initalize(msg: InitializeBuildParams): IO[Option[Json]] =
+      state.update(_.copy(workspaceUri = Some(msg.rootUri))) as {
+        Some {
+          InitializeBuildResult(
+            displayName = "Mezel",
+            version = "1.0.0",
+            bspVersion = "2.1.0",
+            capabilities = BuildServerCapabilities(
+              compileProvider = Some(AnyProvider(List("scala"))),
+              testProvider = None,
+              runProvider = None,
+              debugProvider = None,
+              inverseSourcesProvider = Some(true),
+              dependencySourcesProvider = Some(true),
+              dependencyModulesProvider = None,
+              resourcesProvider = Some(true),
+              outputPathsProvider = None,
+              buildTargetChangedProvider = Some(false), // can probably be true
+              jvmRunEnvironmentProvider = Some(true),
+              jvmTestEnvironmentProvider = Some(true),
+              canReload = Some(false) // what does this mean?
+            )
+          ).asJson
         }
       }
+
+    def buldTargets: IO[Option[Json]] =
+      workspaceUri.map { uri =>
+        Some {
+          WorkspaceBuildTargetsResult(
+            targets = List(
+              BuildTarget(
+                id = BuildTargetIdentifier(uri),
+                displayName = None,
+                baseDirectory = None,
+                tags = Nil,
+                languageIds = List("scala"),
+                dependencies = Nil,
+                capabilities = BuildTargetCapabilities(
+                  canCompile = Some(true),
+                  canTest = None,
+                  canRun = None,
+                  canDebug = None
+                ),
+                dataKind = None,
+                data = None
+              )
+            )
+          ).asJson
+        }
+      }
+  }
+
+  def run: IO[Unit] = {
+    SignallingRef.of[IO, BspState](BspState.empty).flatMap { state =>
+      Catch.ioCatch.flatMap { implicit C =>
+        Files[IO]
+          .readAll(Path("/tmp/from-metals"))
+          .through(fs2.text.utf8.decode)
+          .through(jsonRpcRequests)
+          .evalMap { x =>
+            def expect[A: Decoder]: IO[A] =
+              IO.fromOption(x.params)(new RuntimeException(s"No params for method ${x.method}"))
+                .map(_.as[A])
+                .rethrow
+
+            def id: IO[RpcId] =
+              IO.fromOption(x.id)(new RuntimeException(s"No id for method ${x.method}"))
+
+            C.use[BspResponseError] { implicit R =>
+              val ops: BspServerOps = new BspServerOps(state)
+
+              x.method match {
+                case "build/initialize"              => expect[InitializeBuildParams].flatMap(ops.initalize)
+                case "workspace/buildTargets"        => ???
+                case "buildTarget/scalacOptions"     => ???
+                case "buildTarget/javacOptions"      => ???
+                case "buildTarget/sources"           => ???
+                case "buildTarget/dependencySources" => ???
+                case "buildTarget/scalaMainClasses"  => ???
+                case "buildTarget/jvmRunEnvironment" => ???
+                case "buildTarget/scalaTestClasses"  => ???
+                case "buildTarget/compile"           => ???
+                case "build/taskStart"               => ???
+                case "build/taskProgress"            => ???
+                case m                               => IO.raiseError(new RuntimeException(s"Unknown method: $m"))
+              }
+            }
+          }
+
+        ???
+      }
+    }
 
     val content = _root_.io.circe.parser
       .parse("""{
