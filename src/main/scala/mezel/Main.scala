@@ -2,6 +2,7 @@ package mezel
 
 import com.google.devtools.build.lib.query2.proto.proto2api.build
 import com.google.devtools.build.lib.analysis.analysis_v2
+import _root_.io.circe.syntax.*
 import cats.implicits.*
 import io.circe.parser.*
 import io.circe.*
@@ -22,24 +23,27 @@ object Main extends IOApp.Simple {
     SignallingRef.of[IO, BspState](BspState.empty).flatMap { state =>
       Catch.ioCatch.flatMap { implicit C =>
         Files[IO]
-          .readAll(Path("/tmp/from-metals"))
+          .tail(Path("/tmp/from-metals"))
           .through(fs2.text.utf8.decode)
+          .evalTap(x => IO.println(s"Received: $x"))
           .through(jsonRpcRequests)
+          .evalTap(x => IO.println(s"Request: $x"))
           .evalMap { x =>
             def expect[A: Decoder]: IO[A] =
               IO.fromOption(x.params)(new RuntimeException(s"No params for method ${x.method}"))
                 .map(_.as[A])
                 .rethrow
 
-            def id: IO[RpcId] =
-              IO.fromOption(x.id)(new RuntimeException(s"No id for method ${x.method}"))
+            // def id: IO[RpcId] =
+            //   IO.fromOption(x.id)(new RuntimeException(s"No id for method ${x.method}"))
 
             C.use[BspResponseError] { implicit R =>
               val ops: BspServerOps = new BspServerOps(state)
 
               x.method match {
                 case "build/initialize"              => expect[InitializeBuildParams].flatMap(ops.initalize)
-                case "workspace/buildTargets"        => ???
+                case "build/initialized"             => IO.pure(None)
+                case "workspace/buildTargets"        => ops.buildTargets
                 case "buildTarget/scalacOptions"     => ???
                 case "buildTarget/javacOptions"      => ???
                 case "buildTarget/sources"           => ???
@@ -52,29 +56,36 @@ object Main extends IOApp.Simple {
                 case "build/taskProgress"            => ???
                 case m                               => IO.raiseError(new RuntimeException(s"Unknown method: $m"))
               }
+            }.map {
+              case Left(err)    => Response("2.0", x.id, None, Some(err.responseError))
+              case Right(value) => Response("2.0", x.id, value, None)
             }
           }
-
-        ???
+          .map(_.asJson.spaces2)
+          .map(data => s"Content-Length: ${data.length}\r\n\r\n$data")
+          .through(fs2.text.utf8.encode)
+          .through(Files[IO].writeAll(Path("/tmp/to-metals")))
+          .compile
+          .drain
       }
     }
-    BazelAPI(Path("."))
-      .aquery {
-        dsl.kind("scala_library") {
-          dsl.deps("//...")
-        }
-      }
-      .flatMap { x =>
-        IO.println(x.artifacts.take(100).mkString("\n")) *>
-          IO.println(x.actions.take(100).mkString("\n")) *>
-          IO.println(x.targets.take(100).mkString("\n")) *>
-          IO.println(x.depSetOfFiles.take(100).mkString("\n")) *>
-          IO.println(x.configuration.take(100).mkString("\n")) *>
-          IO.println(x.aspectDescriptors.take(100).mkString("\n")) *>
-          IO.println(x.ruleClasses.take(100).mkString("\n")) *>
-          IO.println(x.pathFragments.take(100).mkString("\n"))
-      }
-/*
+    // BazelAPI(Path("."))
+    //   .aquery {
+    //     dsl.kind("scala_library") {
+    //       dsl.deps("//...")
+    //     }
+    //   }
+    //   .flatMap { x =>
+    //     IO.println(x.artifacts.take(100).mkString("\n")) *>
+    //       IO.println(x.actions.take(100).mkString("\n")) *>
+    //       IO.println(x.targets.take(100).mkString("\n")) *>
+    //       IO.println(x.depSetOfFiles.take(100).mkString("\n")) *>
+    //       IO.println(x.configuration.take(100).mkString("\n")) *>
+    //       IO.println(x.aspectDescriptors.take(100).mkString("\n")) *>
+    //       IO.println(x.ruleClasses.take(100).mkString("\n")) *>
+    //       IO.println(x.pathFragments.take(100).mkString("\n"))
+    //   }
+  /*
     BazelAPI(Path("."))
       .query {
         dsl.kind("scala_library") {
@@ -239,17 +250,17 @@ final case class BuildTargetCapabilities(
 ) derives Codec.AsObject
 
 final case class JvmBuildTarget(
-  javaHome: Option[SafeUri],
-  javaVersion: Option[String],
+    javaHome: Option[SafeUri],
+    javaVersion: Option[String]
 ) derives Codec.AsObject
 
 final case class ScalaBuildTarget(
-  scalaOrganization: String,
-  scalaVersion: String,
-  scalaBinaryVersion: String,
-  platform: 1,
-  jars: List[SafeUri],
-  jvmBuildTarget: Option[JvmBuildTarget]
+    scalaOrganization: String,
+    scalaVersion: String,
+    scalaBinaryVersion: String,
+    platform: 1,
+    jars: List[SafeUri],
+    jvmBuildTarget: Option[JvmBuildTarget]
 ) derives Codec.AsObject
 
 final case class BuildTarget(
@@ -261,7 +272,7 @@ final case class BuildTarget(
     dependencies: List[BuildTargetIdentifier],
     capabilities: BuildTargetCapabilities,
     dataKind: Option[String],
-    data: Option[Json]
+    data: Option[ScalaBuildTarget]
 ) derives Codec.AsObject
 
 final case class WorkspaceBuildTargetsResult(

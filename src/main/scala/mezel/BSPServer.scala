@@ -19,9 +19,13 @@ import catcheffect.*
 import cats.*
 import cats.derived.*
 import alleycats.*
+import java.nio.file.Paths
+import java.net.URI
 
 enum BspResponseError(val code: Int, val message: String, val data: Option[Json] = None):
   case NotInitialized extends BspResponseError(-32002, "Server not initialized")
+
+  def responseError: ResponseError = ResponseError(code, message, data)
 
 final case class BspState(
     workspaceRoot: Option[SafeUri]
@@ -65,8 +69,8 @@ class BspServerOps(state: SignallingRef[IO, BspState])(implicit R: Raise[IO, Bsp
             )
           ).asJson
 
-  def buldTargets: IO[Option[Json]] =
-    workspaceRoot.map { uri =>
+  def buildTargets: IO[Option[Json]] =
+    workspaceRoot.flatMap { uri =>
       import dsl._
 
       def q = kind("scala_library")("...")
@@ -82,7 +86,7 @@ class BspServerOps(state: SignallingRef[IO, BspState])(implicit R: Raise[IO, Bsp
         }
       }
 
-      val api = BazelAPI(Path(uri.value))
+      val api = BazelAPI(Path.fromNioPath(Paths.get(new URI(uri.value))))
       // use query to get targets & deps & plugins
       // use aquery to get output jars (target -> outputs):
       //   for aquery, scala_library produces semanticdb
@@ -122,7 +126,8 @@ class BspServerOps(state: SignallingRef[IO, BspState])(implicit R: Raise[IO, Bsp
           .map(x => targetIdToLabel(x.targetId) -> x.arguments.find(_.startsWith("-P:semanticdb:targetroot")).get)
           .toMap
 
-        assert(scalacTargets == scalaQueryTargets.keySet, s"should find the same build targets in query and aquery")
+        val d = (scalacTargets -- scalaQueryTargets.keySet) ++ (scalaQueryTargets.keySet -- scalacTargets)
+        assert(scalacTargets == scalaQueryTargets.keySet, s"should find the same build targets in query and aquery, difference was ${d}")
         assert(scalacTargets == semanticsDbArg.keySet, s"every scala target should have a semanticdb arg")
 
         // lazy val scalacLabelToArtifacts = scalacActions
@@ -173,5 +178,3 @@ class BspServerOps(state: SignallingRef[IO, BspState])(implicit R: Raise[IO, Bsp
         }
       }
     }
-
-    ???
