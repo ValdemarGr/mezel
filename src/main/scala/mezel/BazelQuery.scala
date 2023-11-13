@@ -4,14 +4,18 @@ import cats.implicits.*
 import cats.data.*
 import cats.Eval
 
+trait AnyQuery:
+  def render: String
+
 enum BinOp:
   case Intersect
   case Union
   case Except
 
-enum Query:
+enum Query extends AnyQuery:
   case Word(value: String)
   case Integer(value: Int)
+  case Var(name: String)
   case Deps(q: Query, depth: Option[Integer])
   case RDeps(u: Query, x: Query, depth: Option[Integer])
   case AllRDeps(u: Query, depth: Option[Integer])
@@ -33,82 +37,95 @@ enum Query:
   case Parens(q: Query)
   case Binary(left: Query, op: BinOp, right: Query)
   case Set(qs: List[Query])
+  case Inputs(w: Word, q: Query)
+  case Outputs(w: Word, q: Query)
+  case Mnemonic(w: Word, q: Query)
 
   def render: String = renderQuery(this)
 
 object dsl:
+  import Query._
   def unify(q: Query | String): Query = q match
     case q: Query  => q
-    case s: String => Query.Word(s)
+    case s: String => Word(s)
+
+  def inputs(w: String)(q: Query | String): Query =
+    Inputs(Word(w), unify(q))
+
+  def outputs(w: String)(q: Query | String): Query =
+    Outputs(Word(w), unify(q))
+
+  def mnemonic(w: String)(q: Query | String): Query =
+    Mnemonic(Word(w), unify(q))
 
   def deps(q: Query | String, depth: Option[Int] = None): Query =
-    Query.Deps(unify(q), depth.map(Query.Integer(_)))
+    Deps(unify(q), depth.map(Integer(_)))
 
   def rdeps(u: Query | String, x: Query | String, depth: Option[Int] = None): Query =
-    Query.RDeps(unify(u), unify(x), depth.map(Query.Integer(_)))
+    RDeps(unify(u), unify(x), depth.map(Integer(_)))
 
   def allrdeps(u: Query | String, depth: Option[Int] = None): Query =
-    Query.AllRDeps(unify(u), depth.map(Query.Integer(_)))
+    AllRDeps(unify(u), depth.map(Integer(_)))
 
   def samePkgDirectRDeps(u: Query | String): Query =
-    Query.SamePkgDirectRDeps(unify(u))
+    SamePkgDirectRDeps(unify(u))
 
   def siblings(u: Query | String): Query =
-    Query.Siblings(unify(u))
+    Siblings(unify(u))
 
   def some(q: Query | String, count: Option[Int] = None): Query =
-    Query.Some(unify(q), count.map(Query.Integer(_)))
+    Some(unify(q), count.map(Integer(_)))
 
   def somePaths(s: Query | String, e: Query | String): Query =
-    Query.SomePaths(unify(s), unify(e))
+    SomePaths(unify(s), unify(e))
 
   def allPaths(s: Query | String, e: Query | String): Query =
-    Query.AllPaths(unify(s), unify(e))
+    AllPaths(unify(s), unify(e))
 
   def kind(w: String)(input: Query | String): Query =
-    Query.Kind(Query.Word(w), unify(input))
+    Kind(Word(w), unify(input))
 
   def filter(w: String, input: Query | String): Query =
-    Query.Filter(Query.Word(w), unify(input))
+    Filter(Word(w), unify(input))
 
   def attr(name: String, pattern: String, input: Query | String): Query =
-    Query.Attr(Query.Word(name), Query.Word(pattern), unify(input))
+    Attr(Word(name), Word(pattern), unify(input))
 
   def visible(predicate: Query | String, input: Query | String): Query =
-    Query.Visible(unify(predicate), unify(input))
+    Visible(unify(predicate), unify(input))
 
   def labels(attrName: String, input: Query | String): Query =
-    Query.Labels(Query.Word(attrName), unify(input))
+    Labels(Word(attrName), unify(input))
 
   def tests(input: Query | String): Query =
-    Query.Tests(unify(input))
+    Tests(unify(input))
 
   def buildfiles(input: Query | String): Query =
-    Query.Buildfiles(unify(input))
+    Buildfiles(unify(input))
 
   def rbuildfiles(ws: NonEmptyList[String]): Query =
-    Query.RBuildfiles(ws.map(Query.Word(_)))
+    RBuildfiles(ws.map(Word(_)))
 
   def loadfiles(input: Query | String): Query =
-    Query.Loadfiles(unify(input))
+    Loadfiles(unify(input))
 
-  def let(name: String)(value: Query | String)(in: Query | String): Query =
-    Query.Let(name, unify(value), unify(in))
+  def let(name: String)(value: Query | String)(in: Var => Query | String): Query =
+    Let(name, unify(value), unify(in(Var(name))))
 
   def parens(q: Query | String): Query =
-    Query.Parens(unify(q))
+    Parens(unify(q))
 
   def intersect(left: Query | String, right: Query | String): Query =
-    Query.Binary(unify(left), BinOp.Intersect, unify(right))
+    Binary(unify(left), BinOp.Intersect, unify(right))
 
   def union(left: Query | String)(right: Query | String): Query =
-    Query.Binary(unify(left), BinOp.Union, unify(right))
+    Binary(unify(left), BinOp.Union, unify(right))
 
   def except(left: Query | String)(right: Query | String): Query =
-    Query.Binary(unify(left), BinOp.Except, unify(right))
+    Binary(unify(left), BinOp.Except, unify(right))
 
   def set(qs: List[Query | String]): Query =
-    Query.Set(qs.map(unify))
+    Set(qs.map(unify))
 
 def renderOp(op: BinOp): String = op match
   case BinOp.Intersect => "intersect"
@@ -126,6 +143,7 @@ def renderQuery(q: Query): String = {
     q match
       case Word(value)                => Eval.now(s"\"${value}\"")
       case Integer(value)             => Eval.now(value.toString)
+      case Var(name)                  => Eval.now(name)
       case Deps(q, depth)             => fns("deps", q :: depth.toList)
       case RDeps(u, x, depth)         => fns("rdeps", u :: x :: depth.toList)
       case AllRDeps(u, depth)         => fns("allrdeps", u :: depth.toList)
@@ -147,6 +165,9 @@ def renderQuery(q: Query): String = {
       case Parens(q)                  => go(q).map(s => s"(${s})")
       case Binary(left, op, right)    => (go(left), go(right)).mapN((l, r) => s"${l} ${op} ${r}")
       case Set(qs)                    => fns("set", qs)
+      case Inputs(w, q)               => fn("inputs", w, q)
+      case Outputs(w, q)              => fn("outputs", w, q)
+      case Mnemonic(w, q)             => fn("mnemonic", w, q)
   }
 
   go(q).value

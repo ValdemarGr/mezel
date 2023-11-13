@@ -18,7 +18,7 @@ import fs2.concurrent.SignallingRef
 import catcheffect.*
 
 object Main extends IOApp.Simple {
-  def run: IO[Unit] = {
+  def run: IO[Unit] =
     SignallingRef.of[IO, BspState](BspState.empty).flatMap { state =>
       Catch.ioCatch.flatMap { implicit C =>
         Files[IO]
@@ -58,52 +58,29 @@ object Main extends IOApp.Simple {
         ???
       }
     }
-
-    val content = _root_.io.circe.parser
-      .parse("""{
-  "jsonrpc": "2.0",
-  "id": "1",
-  "result": {
-    "displayName": "Mezel",
-    "version": "1.0.0",
-    "bspVersion": "2.0.0",
-    "capabilities": {
-      "compileProvider": {
-        "languageIds": ["scala"]
-      }
-    }
-  }
-}""").fold(throw _, identity)
-      .noSpaces
-    val msg =
-      s"""|Content-Length: ${content.length}
-              |""".stripMargin + "\r\n" + content
-
-    Stream(msg)
-      .through(fs2.text.utf8.encode)
-      .through(Files[IO].writeAll(Path("/tmp/to-metals")))
-      .compile
-      .drain
-
-    // Files[IO]
-    //   .tail(Path("/tmp/metals"))
-    //   .through(text.utf8.decode)
-    //   .evalMap { x =>
-    //   }
-    //   .compile
-    //   .drain
-
-    import dsl.*
     BazelAPI(Path("."))
       .aquery {
-        kind("scala_library") {
-          deps("//...")
+        dsl.kind("scala_library") {
+          dsl.deps("//...")
         }
       }
-      .flatMap(x => IO(println(x)))
-
-    BazelAPI(Path(".")).runBuild("//...").flatMap(x => IO(println(x)))
-  }
+      .flatMap { x =>
+        IO.println(x.artifacts.take(100).mkString("\n")) *>
+          IO.println(x.actions.take(100).mkString("\n")) *>
+          IO.println(x.targets.take(100).mkString("\n")) *>
+          IO.println(x.depSetOfFiles.take(100).mkString("\n")) *>
+          IO.println(x.configuration.take(100).mkString("\n")) *>
+          IO.println(x.aspectDescriptors.take(100).mkString("\n")) *>
+          IO.println(x.ruleClasses.take(100).mkString("\n")) *>
+          IO.println(x.pathFragments.take(100).mkString("\n"))
+      }
+/*
+    BazelAPI(Path("."))
+      .query {
+        dsl.kind("scala_library") {
+          dsl.deps("//...")
+        }
+      }.map(_.target.take(100)).flatMap(x => IO(println(x.mkString("\n")))) */
 }
 
 enum ParserState:
@@ -259,6 +236,20 @@ final case class BuildTargetCapabilities(
     canTest: Option[Boolean],
     canRun: Option[Boolean],
     canDebug: Option[Boolean]
+) derives Codec.AsObject
+
+final case class JvmBuildTarget(
+  javaHome: Option[SafeUri],
+  javaVersion: Option[String],
+) derives Codec.AsObject
+
+final case class ScalaBuildTarget(
+  scalaOrganization: String,
+  scalaVersion: String,
+  scalaBinaryVersion: String,
+  platform: 1,
+  jars: List[SafeUri],
+  jvmBuildTarget: Option[JvmBuildTarget]
 ) derives Codec.AsObject
 
 final case class BuildTarget(
