@@ -41,20 +41,22 @@ object Main extends IOApp.Simple {
               val ops: BspServerOps = new BspServerOps(state)
 
               x.method match {
-                case "build/initialize"              => expect[InitializeBuildParams].flatMap(ops.initalize)
-                case "build/initialized"             => IO.pure(None)
-                case "workspace/buildTargets"        => ops.buildTargets
-                case "buildTarget/scalacOptions"     => ???
-                case "buildTarget/javacOptions"      => ???
-                case "buildTarget/sources"           => ???
-                case "buildTarget/dependencySources" => ???
-                case "buildTarget/scalaMainClasses"  => ???
-                case "buildTarget/jvmRunEnvironment" => ???
-                case "buildTarget/scalaTestClasses"  => ???
-                case "buildTarget/compile"           => ???
-                case "build/taskStart"               => ???
-                case "build/taskProgress"            => ???
-                case m                               => IO.raiseError(new RuntimeException(s"Unknown method: $m"))
+                case "build/initialize"       => expect[InitializeBuildParams].flatMap(ops.initalize)
+                case "build/initialized"      => IO.pure(None)
+                case "workspace/buildTargets" => ops.buildTargets
+                case "buildTarget/scalacOptions" =>
+                  expect[ScalacOptionsParams].flatMap(p => ops.scalacOptions(p.targets.map(_.uri)))
+                case "buildTarget/javacOptions" => IO.pure(Some(ScalacOptionsResult(Nil).asJson))
+                case "buildTarget/sources" =>
+                  expect[SourcesParams].flatMap(sps => ops.sources(sps.targets.map(_.uri)))
+                // case "buildTarget/dependencySources" => ???
+                // case "buildTarget/scalaMainClasses"  => ???
+                // case "buildTarget/jvmRunEnvironment" => ???
+                // case "buildTarget/scalaTestClasses"  => ???
+                // case "buildTarget/compile"           => ???
+                // case "build/taskStart"               => ???
+                // case "build/taskProgress"            => ???
+                case m => IO.raiseError(new RuntimeException(s"Unknown method: $m"))
               }
             }.map {
               case Left(err)    => Response("2.0", x.id, None, Some(err.responseError))

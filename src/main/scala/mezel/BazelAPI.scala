@@ -22,20 +22,23 @@ import alleycats.*
 import fs2.io.process.*
 import scalapb._
 
-class BazelAPI(rootDir: Path):
+class BazelAPI(rootDir: Path) {
+  def run(pb: ProcessBuilder): Resource[IO, Process[IO]] =
+    Resource.eval(IO.println(s"running bazel command: ${pb.command} ${pb.args.map(x => s"'$x'").mkString(" ")}")) >>
+      pb.spawn[IO]
+
   def builder(cmd: String, args: String*) = {
     ProcessBuilder("bazel", cmd :: "--noshow_loading_progress" :: "--noshow_progress" :: args.toList)
       .withWorkingDirectory(rootDir)
   }
 
   def runAndParse[A <: GeneratedMessage](cmd: String, args: String*)(implicit ev: GeneratedMessageCompanion[A]): IO[A] = {
-    builder(cmd, args*)
-      .spawn[IO]
-      .use: proc =>
+    run(builder(cmd, args*))
+      .use { proc =>
         fs2.io
           .toInputStreamResource(proc.stdout)
-          .use: is =>
-            IO.interruptibleMany(ev.parseFrom(is))
+          .use(is => IO.interruptibleMany(ev.parseFrom(is)))
+      }
   }
 
   def query(q: Query): IO[build.QueryResult] =
@@ -45,4 +48,5 @@ class BazelAPI(rootDir: Path):
     runAndParse[analysis_v2.ActionGraphContainer]("aquery", q.render, "--output=proto")
 
   def runBuild(targets: String*): IO[Int] =
-    builder("build", targets*).spawn[IO].use(_.exitValue)
+    run(builder("build", targets*)).use(_.exitValue)
+}

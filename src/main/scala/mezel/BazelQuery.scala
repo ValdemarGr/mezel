@@ -143,7 +143,7 @@ def renderQuery(q: Query): String = {
     q match
       case Word(value)                => Eval.now(s"\"${value}\"")
       case Integer(value)             => Eval.now(value.toString)
-      case Var(name)                  => Eval.now(name)
+      case Var(name)                  => Eval.now(s"$$${name}")
       case Deps(q, depth)             => fns("deps", q :: depth.toList)
       case RDeps(u, x, depth)         => fns("rdeps", u :: x :: depth.toList)
       case AllRDeps(u, depth)         => fns("allrdeps", u :: depth.toList)
@@ -163,7 +163,7 @@ def renderQuery(q: Query): String = {
       case Loadfiles(input)           => fn("loadfiles", input)
       case Let(name, value, in)       => (go(value), go(in)).mapN((v, i) => s"let $name = ${v} in ${i}")
       case Parens(q)                  => go(q).map(s => s"(${s})")
-      case Binary(left, op, right)    => (go(left), go(right)).mapN((l, r) => s"${l} ${op} ${r}")
+      case Binary(left, op, right)    => (go(left), go(right)).mapN((l, r) => s"${l} ${renderOp(op)} ${r}")
       case Set(qs)                    => fns("set", qs)
       case Inputs(w, q)               => fn("inputs", w, q)
       case Outputs(w, q)              => fn("outputs", w, q)
