@@ -79,7 +79,7 @@ final case class QueryOutput(
     if excludeLabels.exists(l.startsWith) then None
     else {
       x.arguments.find(_.startsWith("-P:semanticdb:targetroot")) match {
-        case None      => throw new RuntimeException(s"no semanticdb arg for ${l}, args: ${x.arguments}")
+        case None      => None // throw new RuntimeException(s"no semanticdb arg for ${l}, args: ${x.arguments}")
         case Some(arg) => Some(l -> arg)
       }
     }
@@ -111,9 +111,12 @@ object QueryOutput {
       val sc = kind("scala_library")(mnemonic("Scalac")(everything))
       val jvm = kind("jvm_import")(everything)
       val gen = kind("genrule")(everything)
+      val proto = kind("proto_library")(everything)
       union(sc) {
         union(jvm) {
-          gen
+          union(gen) {
+            proto
+          }
         }
       }
     }
@@ -163,22 +166,72 @@ class BspServerOps(state: SignallingRef[IO, BspState])(implicit R: Raise[IO, Bsp
 
   def regen: IO[QueryOutput] = workspaceRoot.flatMap(QueryOutput.make(_))
 
-  def sources(targets: List[SafeUri]): IO[Option[Json]] =
-    regen.map { qo =>
-      Some {
-        SourcesResult {
-          targets.map { uri =>
-            val label = qo.pathToLabel(uriToPath(uri))
-            val (qt, _) = qo.sourceTargets(label)
-            val act = qo.scalacActionsMap(label)
-            val srcs = act.arguments.dropWhile(_ =!= "--Files").tail.takeWhile(x => !x.startsWith("--"))
-            SourcesItem(
-              BuildTargetIdentifier(uri),
-              srcs.map(Path(_)).map(pathToUri).map(SourceItem(_, SourceItemKind.File, false)).toList,
-              Nil
-            )
+  // todo optimize
+  def dependencySources(targets: List[SafeUri]): IO[Option[Json]] = {
+    regen.flatMap { qo =>
+      workspaceRoot.map(uriToPath).flatMap { root =>
+        val argSrcs =
+          qo.aqr.actions.flatMap(_.arguments.drop(1).filter(x => x.endsWith("-src.jar") || x.endsWith("-sources.jar"))).distinct.toList
+
+        val m = qo.aqr.pathFragments.map(p => p.id -> p).toMap
+        def buildPath(x: analysis_v2.PathFragment): Path = {
+          def go(x: analysis_v2.PathFragment): Eval[Path] =
+            m.get(x.parentId).traverse(go(_)).map(_.map(_ / x.label).getOrElse(Path(x.label)))
+
+          go(x).value
+        }
+
+        val outputSrcs = qo.aqr.actions.zipWithIndex.flatMap { case (a, i) =>
+          if (i % 1000 === 0) println(s"processing action ${i}/${qo.aqr.actions.size}")
+          a.outputIds.mapFilter { id =>
+            val r = m(id)
+            if (r.label.endsWith("-src.jar") || r.label.endsWith("-sources.jar")) {
+              val p = buildPath(m(id))
+              Some(root / p)
+            } else None
           }
-        }.asJson
+        }
+
+        val paths = (argSrcs.map(x => root / Path(x)) ++ outputSrcs).distinct
+
+        paths.filterA(Files[IO].exists).map { existing =>
+          val out = Some {
+            DependencySourcesResult {
+              targets.map { t =>
+                DependencySourcesItem(
+                  BuildTargetIdentifier(t),
+                  existing.map(pathToUri)
+                )
+              }
+            }.asJson
+          }
+
+          println("done with dependency sources")
+
+          out
+        }
+      }
+    }
+  }
+
+  def sources(targets: List[SafeUri]): IO[Option[Json]] =
+    regen.flatMap { qo =>
+      workspaceRoot.map(uriToPath).map { root =>
+        Some {
+          SourcesResult {
+            targets.map { uri =>
+              val label = qo.pathToLabel(uriToPath(uri))
+              val (qt, _) = qo.sourceTargets(label)
+              val act = qo.scalacActionsMap(label)
+              val srcs = act.arguments.dropWhile(_ =!= "--Files").tail.takeWhile(x => !x.startsWith("--"))
+              SourcesItem(
+                BuildTargetIdentifier(uri),
+                srcs.map(x => root / Path(x)).map(pathToUri).map(SourceItem(_, SourceItemKind.File, false)).toList,
+                Nil
+              )
+            }
+          }.asJson
+        }
       }
     }
 
@@ -190,7 +243,9 @@ class BspServerOps(state: SignallingRef[IO, BspState])(implicit R: Raise[IO, Bsp
             val label = qo.pathToLabel(uriToPath(uri))
             val (qt, sdb) = qo.sourceTargets(label)
             val act = qo.scalacActionsMap(label)
-            val args = act.arguments.dropWhile(_ =!= "--ScalacOpts").tail.takeWhile(x => !x.startsWith("--"))
+            val args = act.arguments.dropWhile(_ =!= "--ScalacOpts").tail.takeWhile(x => !x.startsWith("--")) ++ List(
+              s"-P:semanticdb:sourceroot:${sdb}"
+            )
             // consider getting this from a query(deps) -> aquery(output jars)
             val classpath = act.arguments.dropWhile(_ =!= "--Classpath").tail.takeWhile(x => !x.startsWith("--"))
             ScalacOptionsItem(
@@ -222,9 +277,9 @@ class BspServerOps(state: SignallingRef[IO, BspState])(implicit R: Raise[IO, Bsp
           dependencies = scalaDeps.map(BuildTargetIdentifier(_)).toList,
           capabilities = BuildTargetCapabilities(
             canCompile = Some(true),
-            canTest = None,
-            canRun = None,
-            canDebug = None
+            canTest = Some(false),
+            canRun = Some(false),
+            canDebug = Some(false)
           ),
           dataKind = Some("scala"),
           data = None

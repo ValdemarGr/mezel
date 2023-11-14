@@ -49,10 +49,15 @@ object Main extends IOApp.Simple {
                 case "buildTarget/javacOptions" => IO.pure(Some(ScalacOptionsResult(Nil).asJson))
                 case "buildTarget/sources" =>
                   expect[SourcesParams].flatMap(sps => ops.sources(sps.targets.map(_.uri)))
-                // case "buildTarget/dependencySources" => ???
-                // case "buildTarget/scalaMainClasses"  => ???
-                // case "buildTarget/jvmRunEnvironment" => ???
-                // case "buildTarget/scalaTestClasses"  => ???
+                case "buildTarget/dependencySources" =>
+                  // IO.pure(Some(DependencySourcesResult(Nil).asJson))
+                  expect[DependencySourcesParams].flatMap(dsp => ops.dependencySources(dsp.targets.map(_.uri)))
+                case "buildTarget/scalaMainClasses" =>
+                  IO.pure(Some(ScalaMainClassesResult(Nil, None).asJson))
+                case "buildTarget/jvmRunEnvironment" =>
+                  IO.pure(Some(JvmRunEnvironmentResult(Nil).asJson))
+                case "buildTarget/scalaTestClasses" =>
+                  IO.pure(Some(ScalaTestClassesResult(Nil).asJson))
                 // case "buildTarget/compile"           => ???
                 // case "build/taskStart"               => ???
                 // case "build/taskProgress"            => ???
@@ -64,6 +69,7 @@ object Main extends IOApp.Simple {
             }
           }
           .map(_.asJson.spaces2)
+          .map{x => println(x.take(100));x}
           .map(data => s"Content-Length: ${data.length}\r\n\r\n$data")
           .through(fs2.text.utf8.encode)
           .through(Files[IO].writeAll(Path("/tmp/to-metals")))
@@ -336,14 +342,14 @@ enum SourceItemKind:
   case Directory
 
 object SourceItemKind:
-  given Decoder[SourceItemKind] = Decoder[String].emap:
-    case "file"      => Right(File)
-    case "directory" => Right(Directory)
-    case other       => Left(s"Unknown SourceItemKind: $other")
+  given Decoder[SourceItemKind] = Decoder[Int].emap:
+    case 1     => Right(File)
+    case 2     => Right(Directory)
+    case other => Left(s"Unknown SourceItemKind: $other")
 
-  given Encoder[SourceItemKind] = Encoder[String].contramap:
-    case File      => "file"
-    case Directory => "directory"
+  given Encoder[SourceItemKind] = Encoder[Int].contramap:
+    case File      => 1
+    case Directory => 2
 
 final case class DependencySourcesParams(
     targets: List[BuildTargetIdentifier]

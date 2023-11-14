@@ -78,6 +78,7 @@ lazy val root = project
 
 lazy val dev = project
   .in(file("dev"))
+  .dependsOn(root)
   .settings(sharedSettings)
   .settings(
     name := "mezel",
