@@ -176,7 +176,6 @@ class BspServerOps(state: SignallingRef[IO, BspState])(implicit R: Raise[IO, Bsp
 
         val pathFrags = qo.aqr.pathFragments.map(p => p.id -> p).toMap
         val arts = qo.aqr.artifacts.map(x => x.id -> x.pathFragmentId)
-        val m: Map[Int, PathFragment] = arts.map { case (id, p) => id -> pathFrags(p) }.toMap
         def buildPath(x: analysis_v2.PathFragment): Path = {
           def go(x: analysis_v2.PathFragment): Eval[Path] = Eval.defer {
             pathFrags.get(x.parentId).traverse(go(_)).map(_.map(_ / x.label).getOrElse(Path(x.label)))
@@ -187,15 +186,16 @@ class BspServerOps(state: SignallingRef[IO, BspState])(implicit R: Raise[IO, Bsp
 
         val uniqueArtifacts = qo.aqr.artifacts.map(_.id)
 
+        val artifactToPath: Map[Int, PathFragment] = arts.map { case (id, p) => id -> pathFrags(p) }.toMap
         val relevantPathRoots = uniqueArtifacts.reverse.zipWithIndex.mapFilter{ case (x, i) =>
           if (i % 50 == 0) println(s"artifact ${i}/ ${uniqueArtifacts.size}")
-          val r = m(x)
+          val r = artifactToPath(x)
           if (r.label.endsWith("-src.jar") || r.label.endsWith("-sources.jar")) {
             Some(r)
           } else None
         }
 
-        val outputSrcs = relevantPathRoots.map(buildPath).distinct.take(10).map(root / _)
+        val outputSrcs = relevantPathRoots.map(buildPath).distinct.map(root / _)
 
         val paths = (argSrcs.map(x => root / Path(x)) ++ outputSrcs).distinct
 
