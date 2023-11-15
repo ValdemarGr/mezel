@@ -13,6 +13,7 @@ import cats.parse.Parser as P
 import cats.parse.Parser0 as P0
 import cats.parse.Rfc5234 as Rfc
 import cats.parse.Numbers as Num
+import scala.concurrent.duration.*
 import _root_.io.circe.Json
 import cats.data.*
 import fs2.concurrent.SignallingRef
@@ -34,8 +35,8 @@ object Main extends IOApp.Simple {
                 .map(_.as[A])
                 .rethrow
 
-            // def id: IO[RpcId] =
-            //   IO.fromOption(x.id)(new RuntimeException(s"No id for method ${x.method}"))
+              // def id: IO[RpcId] =
+              //   IO.fromOption(x.id)(new RuntimeException(s"No id for method ${x.method}"))
 
             C.use[BspResponseError] { implicit R =>
               val ops: BspServerOps = new BspServerOps(state)
@@ -58,18 +59,28 @@ object Main extends IOApp.Simple {
                   IO.pure(Some(JvmRunEnvironmentResult(Nil).asJson))
                 case "buildTarget/scalaTestClasses" =>
                   IO.pure(Some(ScalaTestClassesResult(Nil).asJson))
-                // case "buildTarget/compile"           => ???
+                case "buildTarget/compile"           => 
+                  expect[CompileParams].flatMap(p => ops.compile(p.targets.map(_.uri)))
                 // case "build/taskStart"               => ???
                 // case "build/taskProgress"            => ???
                 case m => IO.raiseError(new RuntimeException(s"Unknown method: $m"))
               }
             }.map {
-              case Left(err)    => Response("2.0", x.id, None, Some(err.responseError))
-              case Right(value) => Response("2.0", x.id, value, None)
+              case Left(err)    => Some(Response("2.0", x.id, None, Some(err.responseError)))
+              case Right(value) =>
+                // if id is defined always respond
+                // if id is not defined only respond if value is defined
+                x.id match {
+                  case Some(id) => Some(Response("2.0", Some(id), value, None))
+                  case None     => value.map(j => Response("2.0", None, Some(j), None))
+                }
             }
           }
+          .unNone
           .map(_.asJson.spaces2)
-          .map{x => println(x.take(100));x}
+          .map { x =>
+            println(x.split("\n").toList.take(10)); x
+          }
           .map(data => s"Content-Length: ${data.length}\r\n\r\n$data")
           .through(fs2.text.utf8.encode)
           .through(Files[IO].writeAll(Path("/tmp/to-metals")))
@@ -298,7 +309,7 @@ final case class ScalacOptionsResult(
 final case class ScalacOptionsItem(
     target: BuildTargetIdentifier,
     options: List[String],
-    classpath: List[String],
+    classpath: List[SafeUri],
     classDirectory: String
 ) derives Codec.AsObject
 
@@ -443,16 +454,16 @@ object StatusCode:
   case object Error extends StatusCode
   case object Cancelled extends StatusCode
 
-  given Decoder[StatusCode] = Decoder[String].emap:
-    case "Ok"        => Right(Ok)
-    case "Error"     => Right(Error)
-    case "Cancelled" => Right(Cancelled)
+  given Decoder[StatusCode] = Decoder[Int].emap:
+    case 1        => Right(Ok)
+    case 2     => Right(Error)
+    case 3 => Right(Cancelled)
     case other       => Left(s"Unknown StatusCode: $other")
 
-  given Encoder[StatusCode] = Encoder[String].contramap:
-    case Ok        => "Ok"
-    case Error     => "Error"
-    case Cancelled => "Cancelled"
+  given Encoder[StatusCode] = Encoder[Int].contramap:
+    case Ok        => 1
+    case Error     => 2
+    case Cancelled => 3
 
 final case class TaskId(id: String) derives Codec.AsObject
 
