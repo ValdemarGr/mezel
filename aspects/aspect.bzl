@@ -37,6 +37,8 @@ def _mezel_aspect(target, ctx):
 
   compile_jars = target[JavaInfo].transitive_compile_time_jars.to_list()
   cp_jars = [x.path for x in compile_jars]
+  source_jars = target[JavaInfo].transitive_source_jars.to_list()
+  src_jars = [x.path for x in source_jars]
 
   dep_providers = tc.dep_providers
   scala_compile_classpath = [
@@ -55,11 +57,12 @@ def _mezel_aspect(target, ctx):
     scalacopts= opts,
     semanticdb_plugin= semanticdb_plugin,
     classpath= cp_jars,
+    sourcejars= src_jars,
     scala_compiler_classpath= [x.path for x in scala_compile_classpath],
     sources= [f.path for src in srcs for f in src.files.to_list()]
   )
 
-  ctx.actions.write(bi, proto.encode_text(data))
+  ctx.actions.write(bi, json.encode(data))
 
   return [
     OutputGroupInfo(bsp_info = [bi]),
