@@ -127,7 +127,7 @@ object QueryOutput {
 }
 
 object Tasks {
-  def buildConfig(uri: SafeUri, targets: String*) = {
+  def buildConfig(uri: SafeUri, targets: String*): IO[Unit] = {
     val api = BazelAPI(uriToPath(uri))
 
     api
@@ -141,15 +141,42 @@ object Tasks {
       .void
   }
 
-  def buildLabels(uri: SafeUri) = {
-    val api = BazelAPI(uriToPath(uri))
+  final case class ScalaVersion(major: Int, minor: Int, patch: Int) {
+    def toVersion: String = s"${major}.${minor}.${patch}"
+  }
+  object ScalaVersion {
+    given Decoder[ScalaVersion] = Decoder[String].emap { s =>
+      val parts = s.split("\\.").toList.mapFilter(_.toIntOption)
+      parts match {
+        case major :: minor :: patch :: Nil => Right(ScalaVersion(major, minor, patch))
+        case _                              => Left(s"invalid scala version: ${s}")
+      }
+    }
+  }
 
-    import dsl._
+  final case class BuildConfig(
+      compilerVersion: ScalaVersion,
+      scalaopts: List[String],
+      semanticdbPlugin: String,
+      classpath: List[String],
+      sourcejars: List[String],
+      scalaCompilerClasspath: List[String],
+      sources: List[String]
+  ) derives Codec.AsObject
+  final case class BuildTarget(
+      label: String,
+      bspFile: String,
+      deps: List[String],
+      directory: String,
+      scalaCompilerClasspath: List[String]
+  ) derives Codec.AsObject
+  def buildTargets(uri: SafeUri): IO[List[BuildTarget]] = {
+    val api = BazelAPI(uriToPath(uri))
 
     api.runBuild("//src:mezel_config").void *>
       api
         .aquery(Query.Word("//src:mezel_config"))
-        .map { x =>
+        .flatMap { x =>
           assert(x.actions.size === 1)
           val pathFrags = x.pathFragments.map(p => p.id -> p).toMap
           val arts = x.artifacts.map(x => x.id -> x.pathFragmentId).toMap
@@ -163,9 +190,8 @@ object Tasks {
 
           val a = x.actions.head
           val outputPath = buildPath(pathFrags(arts(a.primaryOutputId)))
-          Files[IO].readAll(outputPath).through(fs2.text.utf8.decode[IO]).compile.string.flatMap{ str =>
-            // _root_.io.circe.parser.decode
-            ???
+          Files[IO].readAll(outputPath).through(fs2.text.utf8.decode[IO]).compile.string.flatMap { str =>
+            IO.fromEither(_root_.io.circe.parser.decode[List[BuildTarget]](str))
           }
         }
   }
@@ -331,21 +357,16 @@ class BspServerOps(state: SignallingRef[IO, BspState])(implicit R: Raise[IO, Bsp
     }
   }
 
-  def buildTargets: IO[Option[Json]] =
-    regen.map { qo =>
-      println(s"missing from query: ${qo.missingFromQuery}\nmissing from aquery: ${qo.missingFromAquery}")
-      println(s"missing semanticsdb: ${qo.missingSemanticsDb}")
-
-      val targets = qo.sourceTargets.toList.map { case (k, (qt, _)) =>
-        val scalaDeps: Seq[SafeUri] =
-          qt.deps.mapFilter(qo.scalaQueryTargets.get).map(x => pathToUri(x.path))
+  def buildTargets: IO[Option[Json]] = {
+    workspaceRoot.flatMap(Tasks.buildTargets).map { bts =>
+      val targets = bts.map { bt =>
         BuildTarget(
-          id = BuildTargetIdentifier(pathToUri(qt.path)),
-          displayName = Some(qt.path.fileName.toString),
-          baseDirectory = Some(pathToUri(qt.path)),
+          id = BuildTargetIdentifier(pathToUri(Path(bt.label))),
+          displayName = Some(bt.label),
+          baseDirectory = Some(pathToUri(Path(bt.directory))),
           tags = List("library"),
           languageIds = List("scala"),
-          dependencies = scalaDeps.map(BuildTargetIdentifier(_)).toList,
+          dependencies = bt.deps.map(x => BuildTargetIdentifier(pathToUri(Path(x)))),
           capabilities = BuildTargetCapabilities(
             canCompile = Some(true),
             canTest = Some(false),
@@ -359,11 +380,7 @@ class BspServerOps(state: SignallingRef[IO, BspState])(implicit R: Raise[IO, Bsp
               scalaVersion = "2.13.12",
               scalaBinaryVersion = "2.13",
               platform = 1,
-              jars = List(
-                "file:///home/valde/git/mezel-example/bazel-out/k8-fastbuild/bin/external/io_bazel_rules_scala_scala_library/io_bazel_rules_scala_scala_library.stamp/scala-library-2.13.12.jar",
-                "file:///home/valde/git/mezel-example/bazel-out/k8-fastbuild/bin/external/io_bazel_rules_scala_scala_reflect/io_bazel_rules_scala_scala_reflect.stamp/scala-reflect-2.13.12.jar",
-                "file:///home/valde/git/mezel-example/bazel-out/k8-fastbuild/bin/external/io_bazel_rules_scala_scala_compiler/io_bazel_rules_scala_scala_compiler.stamp/scala-compiler-2.13.12.jar"
-              ).map(SafeUri(_)),
+              jars = bt.scalaCompilerClasspath.map(Path(_)).map(pathToUri),
               jvmBuildTarget = Some {
                 JvmBuildTarget(
                   javaHome = Some(SafeUri("file:///nix/store/7c2ksq340xg06jmym46fzd0rbxphlzm3-openjdk-19.0.2+7/lib/openjdk/")),
@@ -374,9 +391,57 @@ class BspServerOps(state: SignallingRef[IO, BspState])(implicit R: Raise[IO, Bsp
           }
         )
       }
-
       Some {
         WorkspaceBuildTargetsResult(targets = targets).asJson
       }
+
+      // regen.map { qo =>
+      //   println(s"missing from query: ${qo.missingFromQuery}\nmissing from aquery: ${qo.missingFromAquery}")
+      //   println(s"missing semanticsdb: ${qo.missingSemanticsDb}")
+
+      //   val targets = qo.sourceTargets.toList.map { case (k, (qt, _)) =>
+      //     val scalaDeps: Seq[SafeUri] =
+      //       qt.deps.mapFilter(qo.scalaQueryTargets.get).map(x => pathToUri(x.path))
+      //     BuildTarget(
+      //       id = BuildTargetIdentifier(pathToUri(qt.path)),
+      //       displayName = Some(qt.path.fileName.toString),
+      //       baseDirectory = Some(pathToUri(qt.path)),
+      //       tags = List("library"),
+      //       languageIds = List("scala"),
+      //       dependencies = scalaDeps.map(BuildTargetIdentifier(_)).toList,
+      //       capabilities = BuildTargetCapabilities(
+      //         canCompile = Some(true),
+      //         canTest = Some(false),
+      //         canRun = Some(false),
+      //         canDebug = Some(false)
+      //       ),
+      //       dataKind = Some("scala"),
+      //       data = Some {
+      //         ScalaBuildTarget(
+      //           scalaOrganization = "org.scala-lang",
+      //           scalaVersion = "2.13.12",
+      //           scalaBinaryVersion = "2.13",
+      //           platform = 1,
+      //           jars = List(
+      //             "file:///home/valde/git/mezel-example/bazel-out/k8-fastbuild/bin/external/io_bazel_rules_scala_scala_library/io_bazel_rules_scala_scala_library.stamp/scala-library-2.13.12.jar",
+      //             "file:///home/valde/git/mezel-example/bazel-out/k8-fastbuild/bin/external/io_bazel_rules_scala_scala_reflect/io_bazel_rules_scala_scala_reflect.stamp/scala-reflect-2.13.12.jar",
+      //             "file:///home/valde/git/mezel-example/bazel-out/k8-fastbuild/bin/external/io_bazel_rules_scala_scala_compiler/io_bazel_rules_scala_scala_compiler.stamp/scala-compiler-2.13.12.jar"
+      //           ).map(SafeUri(_)),
+      //           jvmBuildTarget = Some {
+      //             JvmBuildTarget(
+      //               javaHome = Some(SafeUri("file:///nix/store/7c2ksq340xg06jmym46fzd0rbxphlzm3-openjdk-19.0.2+7/lib/openjdk/")),
+      //               javaVersion = None
+      //             )
+      //           }
+      //         )
+      //       }
+      //     )
+      //   }
+
+      //   Some {
+      //     WorkspaceBuildTargetsResult(targets = targets).asJson
+      //   }
+      // }
     }
+  }
 }
