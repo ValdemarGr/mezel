@@ -126,6 +126,51 @@ object QueryOutput {
   }
 }
 
+object Tasks {
+  def buildConfig(uri: SafeUri, targets: String*) = {
+    val api = BazelAPI(uriToPath(uri))
+
+    api
+      .runBuild(
+        (targets.toList ++ List(
+          "--aspects",
+          "//aspects:aspect.bzl%mezel_aspect",
+          "--output_groups=bsp_info"
+        )): _*
+      )
+      .void
+  }
+
+  def buildLabels(uri: SafeUri) = {
+    val api = BazelAPI(uriToPath(uri))
+
+    import dsl._
+
+    api.runBuild("//src:mezel_config").void *>
+      api
+        .aquery(Query.Word("//src:mezel_config"))
+        .map { x =>
+          assert(x.actions.size === 1)
+          val pathFrags = x.pathFragments.map(p => p.id -> p).toMap
+          val arts = x.artifacts.map(x => x.id -> x.pathFragmentId).toMap
+          def buildPath(x: analysis_v2.PathFragment): Path = {
+            def go(x: analysis_v2.PathFragment): Eval[Path] = Eval.defer {
+              pathFrags.get(x.parentId).traverse(go(_)).map(_.map(_ / x.label).getOrElse(Path(x.label)))
+            }
+
+            go(x).value
+          }
+
+          val a = x.actions.head
+          val outputPath = buildPath(pathFrags(arts(a.primaryOutputId)))
+          Files[IO].readAll(outputPath).through(fs2.text.utf8.decode[IO]).compile.string.flatMap{ str =>
+            // _root_.io.circe.parser.decode
+            ???
+          }
+        }
+  }
+}
+
 object BspState {
   val empty: BspState = Empty[BspState].empty
 }
@@ -187,7 +232,7 @@ class BspServerOps(state: SignallingRef[IO, BspState])(implicit R: Raise[IO, Bsp
         val uniqueArtifacts = qo.aqr.artifacts.map(_.id)
 
         val artifactToPath: Map[Int, PathFragment] = arts.map { case (id, p) => id -> pathFrags(p) }.toMap
-        val relevantPathRoots = uniqueArtifacts.reverse.zipWithIndex.mapFilter{ case (x, i) =>
+        val relevantPathRoots = uniqueArtifacts.reverse.zipWithIndex.mapFilter { case (x, i) =>
           if (i % 50 == 0) println(s"artifact ${i}/ ${uniqueArtifacts.size}")
           val r = artifactToPath(x)
           if (r.label.endsWith("-src.jar") || r.label.endsWith("-sources.jar")) {
