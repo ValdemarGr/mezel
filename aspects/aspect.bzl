@@ -33,11 +33,6 @@ def _mezel_aspect(target, ctx):
   semanticdb_plugin = sdb.plugin_jar
   semanticdb_target_root = sdb.target_root
 
-  compile_jars = target[JavaInfo].transitive_compile_time_jars.to_list()
-  cp_jars = [x.path for x in compile_jars]
-  source_jars = target[JavaInfo].transitive_source_jars.to_list()
-  src_jars = [x.path for x in source_jars]
-
   dep_providers = tc.dep_providers
   scala_compile_classpath = [
     f 
@@ -51,11 +46,23 @@ def _mezel_aspect(target, ctx):
     for x in attrs.deps if BuildTargetInfo in x 
   ]
 
+  # ignored = depset(
+  #   target[JavaInfo].source_jars, 
+  #   transitive = [target[JavaInfo].compile_jars] + [x.ignored for x in dep_outputs]
+  # )
+  # ignored_lst = ignored.to_list()
+
+  transitive_compile_jars = target[JavaInfo].transitive_compile_time_jars.to_list()
+  cp_jars = [x.path for x in transitive_compile_jars]# if x not in ignored_lst]
+  transitive_source_jars = target[JavaInfo].transitive_source_jars.to_list()
+  src_jars = [x.path for x in transitive_source_jars]# if x not in ignored_lst]
+
   scalac_options_file = ctx.actions.declare_file("{}_bsp_scalac_options.json".format(target.label.name))
   scalac_options_content = struct(
     scalacopts= opts,
     semanticdbPlugin= semanticdb_plugin,
     classpath= cp_jars,
+    targetroot= semanticdb_target_root,
   )
   ctx.actions.write(scalac_options_file, json.encode(scalac_options_content))
 
@@ -87,10 +94,11 @@ def _mezel_aspect(target, ctx):
 
   files = struct(
     label = target.label,
-    scalac_options_file = scalac_options_file,
-    sources_file = sources_file,
-    dependency_sources_file = dependency_sources_file,
-    build_target_file = build_target_file
+    # ignored = ignored
+    # scalac_options_file = scalac_options_file,
+    # sources_file = sources_file,
+    # dependency_sources_file = dependency_sources_file,
+    # build_target_file = build_target_file
   )
 
   transitive_output_files = [
@@ -104,49 +112,27 @@ def _mezel_aspect(target, ctx):
         [scalac_options_file, sources_file, dependency_sources_file, build_target_file],
         transitive = transitive_output_files
       ),
+      bsp_info_deps = depset(
+        scala_compile_classpath,
+        transitive = [
+          target[JavaInfo].transitive_compile_time_jars,
+          target[JavaInfo].transitive_source_jars
+        ]
+      )
     ),
     BuildTargetInfo(output = files)
   ]
-  # transitive = [
-  #   x[OutputGroupInfo].bsp_info
-  #   for x in attrs.deps if OutputGroupInfo in x and hasattr(x[OutputGroupInfo], "bsp_info")
-  # ]
-  # return [
-  #   OutputGroupInfo(bsp_info = depset([bsp_target_file], transitive = transitive)),
-  #   BuildTargetInfo(output = struct(label = target.label, bsp_target_file = bsp_target_file))
-  # ]
 
-#def _mezel_config(ctx):
-#  all_files = [x[BuildTargetInfo].output for x in ctx.attr.deps]
-#  scalac_options_files = [x.scalac_options_file for x in all_files]
-#  sources_files = [x.sources_file for x in all_files]
-#  dependency_sources_files = [x.dependency_sources_file for x in all_files]
-#  build_target_files = [x.build_target_file for x in all_files]
-
-#  all_outputs = scalac_options_files + sources_files + dependency_sources_files + build_target_files
-#  # files = [x[OutputGroupInfo].bsp_info for x in ctx.attr.deps]
-#  #output = [
-#  #  {
-#  #    "label": str(l.label),
-#  #    #"bspContent": l.bspContent,
-#  #    "directory": l.directory,
-#  #    "deps": [str(x) for x in l.deps.to_list()],
-#  #    "scalaCompilerClasspath": l.scalaCompilerClasspath
-#  #  }
-#  #  for d in ctx.attr.deps for l in d[BuildTargetInfo].output 
-#  #]
-
-#  #f = ctx.actions.declare_file("all_build_targets.json")
-#  #ctx.actions.write(f, json.encode(output))
-
-#  # return DefaultInfo(runfiles = ctx.runfiles(files = [f]))
-#  # ds = depset([], transitive = files)
-#  # allocate a label for the aspect
-#  ctx.actions.do_nothing(
-#    mnemonic = "MezelConfig",
-#    inputs = all_outputs
-#  )
-#  return DefaultInfo(files = depset(all_outputs))
+def _mezel_config(ctx):
+  all_outputs = depset(
+    [], 
+    transitive = [x[OutputGroupInfo].bsp_info for x in ctx.attr.deps if OutputGroupInfo in x and hasattr(x[OutputGroupInfo], "bsp_info")]
+  )
+  ctx.actions.do_nothing(
+    mnemonic = "MezelConfig",
+    inputs = all_outputs
+  )
+  return DefaultInfo(files = all_outputs)
 
 mezel_aspect = aspect(
   implementation = _mezel_aspect,
@@ -155,14 +141,14 @@ mezel_aspect = aspect(
   toolchains = ["@io_bazel_rules_scala//scala:toolchain_type"],
 )
 
-# mezel_config = rule(
-#   implementation = _mezel_config,
-#   attrs = {
-#     "deps": attr.label_list(
-#       mandatory=True,
-#       aspects = [mezel_aspect],
-#       providers = [JavaInfo, SemanticdbInfo]
-#     )
-#   },
-#   toolchains = ["@io_bazel_rules_scala//scala:toolchain_type"],
-# )
+mezel_config = rule(
+  implementation = _mezel_config,
+  attrs = {
+    "deps": attr.label_list(
+      mandatory=True,
+      aspects = [mezel_aspect],
+      providers = [JavaInfo, SemanticdbInfo]
+    )
+  },
+  toolchains = ["@io_bazel_rules_scala//scala:toolchain_type"],
+)

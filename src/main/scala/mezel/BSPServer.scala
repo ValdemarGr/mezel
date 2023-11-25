@@ -32,99 +32,9 @@ final case class BspState(
     workspaceRoot: Option[SafeUri]
 ) derives Empty
 
-final case class QueryTarget(
-    rule: build.Rule,
-    path: Path
-) {
-  lazy val deps = rule.attribute.filter(_.name === "deps").flatMap(_.stringListValue)
-
-  lazy val sources = rule.attribute.filter(_.name === "srcs").flatMap(_.stringListValue)
-}
-
 def pathToUri(p: Path): SafeUri = SafeUri(s"file://${p.absolute.toString}")
 
 def uriToPath(suri: SafeUri): Path = Path.fromNioPath(Paths.get(new URI(suri.value)))
-
-final case class QueryOutput(
-    qr: build.QueryResult,
-    aqr: analysis_v2.ActionGraphContainer
-) {
-  val excludeLabels = Set("@io_bazel_rules_scala")
-
-  lazy val rules = qr.target.mapFilter(_.rule)
-
-  lazy val labelToPath = rules.mapFilter(x => x.location.map(loc => (x.name, Path(loc).parent.get))).toMap
-  lazy val pathToLabel = labelToPath.map(_.swap)
-
-  lazy val scalaQueryTargets: Map[String, QueryTarget] =
-    rules.mapFilter(x => labelToPath.get(x.name).map(p => x.name -> QueryTarget(x, p))).toMap
-
-  lazy val targetIdToLabel = aqr.targets.map(x => x.id -> x.label).toMap
-
-  lazy val compileJarActions = aqr.actions
-    .filter(_.mnemonic === "CreateCompileJar")
-    .map(x => targetIdToLabel(x.targetId) -> x)
-    .toMap
-
-  lazy val scalacActions = aqr.actions.filter(_.mnemonic === "Scalac")
-
-  lazy val scalacActionsMap = scalacActions.map(x => targetIdToLabel(x.targetId) -> x).toMap
-
-  lazy val scalacTargets = scalacActions
-    .map(x => targetIdToLabel(x.targetId))
-    .toSet
-    .filterNot(x => excludeLabels.exists(x.startsWith))
-
-  lazy val semanticsDbArg = scalacActions.mapFilter { x =>
-    val l = targetIdToLabel(x.targetId)
-    if excludeLabels.exists(l.startsWith) then None
-    else {
-      x.arguments.find(_.startsWith("-P:semanticdb:targetroot")) match {
-        case None      => None // throw new RuntimeException(s"no semanticdb arg for ${l}, args: ${x.arguments}")
-        case Some(arg) => Some(l -> arg)
-      }
-    }
-  }.toMap
-
-  lazy val missingFromQuery = scalacTargets -- scalaQueryTargets.keySet
-  lazy val missingFromAquery = scalaQueryTargets.keySet -- scalacTargets
-  lazy val missingSemanticsDb = scalacTargets -- semanticsDbArg.keySet
-
-  lazy val sourceTargets = scalacTargets.toList.mapFilter { x =>
-    scalaQueryTargets.get(x).flatMap { qt =>
-      semanticsDbArg.get(x).map { s =>
-        // -P:semanticdb:targetroot:bazel-out/k8-fastbuild/bin/src/main/scala/casehub/models/_semanticdb/models
-        val sdb = s.stripPrefix("-P:semanticdb:targetroot:")
-        x -> ((qt, sdb))
-      }
-    }
-  }.toMap
-}
-
-object QueryOutput {
-  def make(uri: SafeUri) = {
-    val api = BazelAPI(uriToPath(uri))
-
-    import dsl._
-    val q = kind("scala_library")(deps("..."))
-
-    val aq = let("everything")(deps("...")) { everything =>
-      val sc = kind("scala_library")(mnemonic("Scalac")(everything))
-      val jvm = kind("jvm_import")(everything)
-      val gen = kind("genrule")(everything)
-      val proto = kind("proto_library")(everything)
-      union(sc) {
-        union(jvm) {
-          union(gen) {
-            proto
-          }
-        }
-      }
-    }
-
-    (api.query(q), api.aquery(aq)).mapN(QueryOutput(_, _))
-  }
-}
 
 object Tasks {
   def buildConfig(uri: SafeUri, targets: String*): IO[Unit] = {
@@ -141,43 +51,46 @@ object Tasks {
       .void
   }
 
-  final case class ScalaVersion(major: Int, minor: Int, patch: Int) {
-    def toVersion: String = s"${major}.${minor}.${patch}"
-  }
-  object ScalaVersion {
-    given Decoder[ScalaVersion] = Decoder[String].emap { s =>
-      val parts = s.split("\\.").toList.mapFilter(_.toIntOption)
-      parts match {
-        case major :: minor :: patch :: Nil => Right(ScalaVersion(major, minor, patch))
-        case _                              => Left(s"invalid scala version: ${s}")
+  final case class BuildTargetFiles(
+      label: String,
+      scalacOptions: Path,
+      sources: Path,
+      dependencySources: Path,
+      buildTarget: Path
+  )
+
+  def buildTargetFile[A: Decoder](uri: SafeUri)(f: BuildTargetFiles => Path): IO[List[(String, A)]] =
+    buildTargetFiles(uri).flatMap { bts =>
+      bts.traverse { bt =>
+        Files[IO].readAll(f(bt)).through(fs2.text.utf8.decode).compile.string.flatMap { str =>
+          IO.fromEither(_root_.io.circe.parser.decode[A](str)) tupleLeft bt.label
+        }
       }
     }
-  }
 
-  final case class BuildConfig(
-      compilerVersion: ScalaVersion,
-      scalaopts: List[String],
-      semanticdbPlugin: String,
-      classpath: List[String],
-      sourcejars: List[String],
-      scalaCompilerClasspath: List[String],
-      sources: List[String]
-  ) derives Codec.AsObject
-  final case class BuildTarget(
-      label: String,
-      bspFile: String,
-      deps: List[String],
-      directory: String,
-      scalaCompilerClasspath: List[String]
-  ) derives Codec.AsObject
-  def buildTargets(uri: SafeUri): IO[List[BuildTarget]] = {
+  def buildTargets(uri: SafeUri): IO[List[(String, AspectTypes.BuildTarget)]] =
+    buildTargetFile[AspectTypes.BuildTarget](uri)(_.buildTarget)
+
+  def scalacOptions(uri: SafeUri): IO[List[(String, AspectTypes.ScalacOptions)]] =
+    buildTargetFile[AspectTypes.ScalacOptions](uri)(_.scalacOptions)
+
+  def sources(uri: SafeUri): IO[List[(String, AspectTypes.Sources)]] =
+    buildTargetFile[AspectTypes.Sources](uri)(_.sources)
+
+  def dependencySources(uri: SafeUri): IO[List[(String, AspectTypes.DependencySources)]] =
+    buildTargetFile[AspectTypes.DependencySources](uri)(_.dependencySources)
+
+  def buildTargetFiles(uri: SafeUri): IO[List[BuildTargetFiles]] = {
     val api = BazelAPI(uriToPath(uri))
 
-    api.runBuild("//src:mezel_config").void *>
+    import dsl._
+    api.runBuild("...").void *>
+      buildConfig(uri, "//src/main/scala/casehub") *>
       api
-        .aquery(Query.Word("//src:mezel_config"))
-        .flatMap { x =>
-          assert(x.actions.size === 1)
+        .aquery(mnemonic("MezelAspect")(deps("//src/main/scala/casehub")), "--aspects //aspects:aspect.bzl%mezel_aspect")
+        .map { x =>
+          val inputMap = x.depSetOfFiles.map(x => x.id -> x.directArtifactIds).toMap
+          val targetMap = x.targets.map(x => x.id -> x.label).toMap
           val pathFrags = x.pathFragments.map(p => p.id -> p).toMap
           val arts = x.artifacts.map(x => x.id -> x.pathFragmentId).toMap
           def buildPath(x: analysis_v2.PathFragment): Path = {
@@ -187,11 +100,21 @@ object Tasks {
 
             go(x).value
           }
-
-          val a = x.actions.head
-          val outputPath = buildPath(pathFrags(arts(a.primaryOutputId)))
-          Files[IO].readAll(outputPath).through(fs2.text.utf8.decode[IO]).compile.string.flatMap { str =>
-            IO.fromEither(_root_.io.circe.parser.decode[List[BuildTarget]](str))
+          x.actions.toList.map { act =>
+            val artifacts = act.inputDepSetIds.flatMap(id => inputMap.get(id).getOrElse(Nil))
+            val pfs = artifacts.map(arts).map(pathFrags)
+            val so = pfs.find(_.label.endsWith("scalac_options.json")).get
+            val s = pfs.find(_.label.endsWith("bsp_sources.json")).get
+            val ds = pfs.find(_.label.endsWith("bsp_dependency_sources.json")).get
+            val bt = pfs.find(_.label.endsWith("build_target.json")).get
+            val root = uriToPath(uri)
+            BuildTargetFiles(
+              targetMap(act.targetId),
+              root / buildPath(so),
+              root / buildPath(s),
+              root / buildPath(ds),
+              root / buildPath(bt)
+            )
           }
         }
   }
@@ -236,89 +159,97 @@ class BspServerOps(state: SignallingRef[IO, BspState])(implicit R: Raise[IO, Bsp
             )
           ).asJson
 
-  def regen: IO[QueryOutput] = workspaceRoot.flatMap(QueryOutput.make(_))
-
   // todo optimize
   def dependencySources(targets: List[SafeUri]): IO[Option[Json]] = {
-    regen.flatMap { qo =>
-      workspaceRoot.map(uriToPath).flatMap { root =>
-        val argSrcs =
-          qo.aqr.actions.flatMap(_.arguments.drop(1).filter(x => x.endsWith("-src.jar") || x.endsWith("-sources.jar"))).distinct.toList
-
-        val pathFrags = qo.aqr.pathFragments.map(p => p.id -> p).toMap
-        val arts = qo.aqr.artifacts.map(x => x.id -> x.pathFragmentId)
-        def buildPath(x: analysis_v2.PathFragment): Path = {
-          def go(x: analysis_v2.PathFragment): Eval[Path] = Eval.defer {
-            pathFrags.get(x.parentId).traverse(go(_)).map(_.map(_ / x.label).getOrElse(Path(x.label)))
-          }
-
-          go(x).value
-        }
-
-        val uniqueArtifacts = qo.aqr.artifacts.map(_.id)
-
-        val artifactToPath: Map[Int, PathFragment] = arts.map { case (id, p) => id -> pathFrags(p) }.toMap
-        val relevantPathRoots = uniqueArtifacts.reverse.zipWithIndex.mapFilter { case (x, i) =>
-          if (i % 50 == 0) println(s"artifact ${i}/ ${uniqueArtifacts.size}")
-          val r = artifactToPath(x)
-          if (r.label.endsWith("-src.jar") || r.label.endsWith("-sources.jar")) {
-            Some(r)
-          } else None
-        }
-
-        val outputSrcs = relevantPathRoots.map(buildPath).distinct.map(root / _)
-
-        val paths = (argSrcs.map(x => root / Path(x)) ++ outputSrcs).distinct
-
-        paths.filterA(Files[IO].exists).map { existing =>
-          val out = Some {
-            DependencySourcesResult {
-              targets.map { t =>
-                DependencySourcesItem(
-                  BuildTargetIdentifier(t),
-                  existing.map(pathToUri)
-                )
-              }
-            }.asJson
-          }
-
-          println("done with dependency sources")
-
-          out
+    workspaceRoot.flatMap { wsr =>
+      Tasks.dependencySources(wsr).map { ds =>
+        val r = uriToPath(wsr)
+        Some {
+          DependencySourcesResult {
+            ds.map { case (label, ds) =>
+              DependencySourcesItem(
+                BuildTargetIdentifier(pathToUri(Path(label))),
+                ds.sourcejars.map(x => pathToUri(r / Path(x))).toList
+              )
+            }
+          }.asJson
         }
       }
     }
+    // regen.flatMap { qo =>
+    //   workspaceRoot.map(uriToPath).flatMap { root =>
+    //     val argSrcs =
+    //       qo.aqr.actions.flatMap(_.arguments.drop(1).filter(x => x.endsWith("-src.jar") || x.endsWith("-sources.jar"))).distinct.toList
+
+    //     val pathFrags = qo.aqr.pathFragments.map(p => p.id -> p).toMap
+    //     val arts = qo.aqr.artifacts.map(x => x.id -> x.pathFragmentId)
+    //     def buildPath(x: analysis_v2.PathFragment): Path = {
+    //       def go(x: analysis_v2.PathFragment): Eval[Path] = Eval.defer {
+    //         pathFrags.get(x.parentId).traverse(go(_)).map(_.map(_ / x.label).getOrElse(Path(x.label)))
+    //       }
+
+    //       go(x).value
+    //     }
+
+    //     val uniqueArtifacts = qo.aqr.artifacts.map(_.id)
+
+    //     val artifactToPath: Map[Int, PathFragment] = arts.map { case (id, p) => id -> pathFrags(p) }.toMap
+    //     val relevantPathRoots = uniqueArtifacts.reverse.zipWithIndex.mapFilter { case (x, i) =>
+    //       if (i % 50 == 0) println(s"artifact ${i}/ ${uniqueArtifacts.size}")
+    //       val r = artifactToPath(x)
+    //       if (r.label.endsWith("-src.jar") || r.label.endsWith("-sources.jar")) {
+    //         Some(r)
+    //       } else None
+    //     }
+
+    //     val outputSrcs = relevantPathRoots.map(buildPath).distinct.map(root / _)
+
+    //     val paths = (argSrcs.map(x => root / Path(x)) ++ outputSrcs).distinct
+
+    //     paths.filterA(Files[IO].exists).map { existing =>
+    //       val out = Some {
+    //         DependencySourcesResult {
+    //           targets.map { t =>
+    //             DependencySourcesItem(
+    //               BuildTargetIdentifier(t),
+    //               existing.map(pathToUri)
+    //             )
+    //           }
+    //         }.asJson
+    //       }
+
+    //       println("done with dependency sources")
+
+    //       out
+    //     }
+    //   }
+    // }
   }
 
   def compile(targets: List[SafeUri]): IO[Option[Json]] =
-    regen.flatMap { qo =>
-      workspaceRoot.map(d => BazelAPI(uriToPath(d))).flatMap { api =>
-        api.runBuild("...").void.as {
-          Some {
-            CompileResult(
-              None,
-              StatusCode.Ok,
-              None,
-              None
-            ).asJson
-          }
+    workspaceRoot.map(d => BazelAPI(uriToPath(d))).flatMap { api =>
+      api.runBuild("...").void.as {
+        Some {
+          CompileResult(
+            None,
+            StatusCode.Ok,
+            None,
+            None
+          ).asJson
         }
       }
     }
 
   def sources(targets: List[SafeUri]): IO[Option[Json]] =
-    regen.flatMap { qo =>
-      workspaceRoot.map(uriToPath).map { root =>
+    workspaceRoot.flatMap { wsr =>
+      Tasks.sources(wsr).map { srcs =>
+        val r = uriToPath(wsr)
         Some {
           SourcesResult {
-            targets.map { uri =>
-              val label = qo.pathToLabel(uriToPath(uri))
-              val (qt, _) = qo.sourceTargets(label)
-              val act = qo.scalacActionsMap(label)
-              val srcs = act.arguments.dropWhile(_ =!= "--Files").tail.takeWhile(x => !x.startsWith("--"))
+            srcs.map { case (label, src) =>
               SourcesItem(
-                BuildTargetIdentifier(uri),
-                srcs.map(x => root / Path(x)).map(pathToUri).map(SourceItem(_, SourceItemKind.File, false)).toList,
+                BuildTargetIdentifier(pathToUri(Path(label))),
+                src.sources.map(x => pathToUri(r / Path(x))).map(SourceItem(_, SourceItemKind.File, false)).toList,
                 Nil
               )
             }
@@ -326,43 +257,83 @@ class BspServerOps(state: SignallingRef[IO, BspState])(implicit R: Raise[IO, Bsp
         }
       }
     }
+    // regen.flatMap { qo =>
+    //   workspaceRoot.map(uriToPath).map { root =>
+    //     Some {
+    //       SourcesResult {
+    //         targets.map { uri =>
+    //           val label = qo.pathToLabel(uriToPath(uri))
+    //           val (qt, _) = qo.sourceTargets(label)
+    //           val act = qo.scalacActionsMap(label)
+    //           val srcs = act.arguments.dropWhile(_ =!= "--Files").tail.takeWhile(x => !x.startsWith("--"))
+    //           SourcesItem(
+    //             BuildTargetIdentifier(uri),
+    //             srcs.map(x => root / Path(x)).map(pathToUri).map(SourceItem(_, SourceItemKind.File, false)).toList,
+    //             Nil
+    //           )
+    //         }
+    //       }.asJson
+    //     }
+    //   }
+    // }
 
   def scalacOptions(targets: List[SafeUri]) = {
-    regen.flatMap { qo =>
-      workspaceRoot.map(uriToPath).map { root =>
+    workspaceRoot.flatMap { wsr =>
+      Tasks.scalacOptions(wsr).map { scos =>
+        val r = uriToPath(wsr)
         Some {
           ScalacOptionsResult {
-            targets.map { uri =>
-              val label = qo.pathToLabel(uriToPath(uri))
-              val (qt, sdb) = qo.sourceTargets(label)
-              val act = qo.scalacActionsMap(label)
-              val args = act.arguments.dropWhile(_ =!= "--ScalacOpts").tail.takeWhile(x => !x.startsWith("--")) ++ List(
-                s"-P:semanticdb:sourceroot:${sdb}"
-              )
-              // consider getting this from a query(deps) -> aquery(output jars)
-              val classpath = act.arguments.dropWhile(_ =!= "--Classpath").tail.takeWhile(x => !x.startsWith("--"))
+            scos.map { case (label, sco) =>
               ScalacOptionsItem(
-                BuildTargetIdentifier(uri),
-                (args.toList ++ List(
+                BuildTargetIdentifier(pathToUri(Path(label))),
+                sco.scalacopts ++ List(
+                  s"-P:semanticdb:targetroot:${sco.targetroot}",
                   "-Xplugin-require:semanticdb",
-                  "-Xplugin:/home/valde/.cache/bloop/semanticdb/org.scalameta.semanticdb-scalac_2.13.12.4.8.3/semanticdb-scalac_2.13.12-4.8.3.jar"
-                )).distinct,
-                classpath.toList.map(x => pathToUri(root / x)),
-                sdb
+                  s"-Xplugin:${r / "bazel-gateway" / Path(sco.semanticdbPlugin)}"
+                ),
+                sco.classpath.map(x => pathToUri(r / Path(x))),
+                sco.semanticdbPlugin
               )
             }
           }.asJson
         }
       }
     }
+    // regen.flatMap { qo =>
+    //   workspaceRoot.map(uriToPath).map { root =>
+    //     Some {
+    //       ScalacOptionsResult {
+    //         targets.map { uri =>
+    //           val label = qo.pathToLabel(uriToPath(uri))
+    //           val (qt, sdb) = qo.sourceTargets(label)
+    //           val act = qo.scalacActionsMap(label)
+    //           val args = act.arguments.dropWhile(_ =!= "--ScalacOpts").tail.takeWhile(x => !x.startsWith("--")) ++ List(
+    //             s"-P:semanticdb:sourceroot:${sdb}"
+    //           )
+    //           // consider getting this from a query(deps) -> aquery(output jars)
+    //           val classpath = act.arguments.dropWhile(_ =!= "--Classpath").tail.takeWhile(x => !x.startsWith("--"))
+    //           ScalacOptionsItem(
+    //             BuildTargetIdentifier(uri),
+    //             (args.toList ++ List(
+    //               "-Xplugin-require:semanticdb",
+    //               "-Xplugin:/home/valde/.cache/bloop/semanticdb/org.scalameta.semanticdb-scalac_2.13.12.4.8.3/semanticdb-scalac_2.13.12-4.8.3.jar"
+    //             )).distinct,
+    //             classpath.toList.map(x => pathToUri(root / x)),
+    //             sdb
+    //           )
+    //         }
+    //       }.asJson
+    //     }
+    //   }
+    // }
   }
 
   def buildTargets: IO[Option[Json]] = {
     workspaceRoot.flatMap(Tasks.buildTargets).map { bts =>
-      val targets = bts.map { bt =>
+      val targets = bts.map { case (label, bt) =>
         BuildTarget(
-          id = BuildTargetIdentifier(pathToUri(Path(bt.label))),
-          displayName = Some(bt.label),
+          id = BuildTargetIdentifier(pathToUri(Path(label))),
+          displayName = Some(label),
           baseDirectory = Some(pathToUri(Path(bt.directory))),
           tags = List("library"),
           languageIds = List("scala"),

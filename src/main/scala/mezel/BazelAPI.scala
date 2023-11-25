@@ -27,13 +27,13 @@ class BazelAPI(rootDir: Path) {
     Resource.eval(IO.println(s"running bazel command: ${pb.command} ${pb.args.map(x => s"'$x'").mkString(" ")}")) >>
       pb.spawn[IO]
 
-  def builder(cmd: String, args: String*) = {
-    ProcessBuilder("bazel", cmd :: "--noshow_loading_progress" :: "--noshow_progress" :: args.toList)
+  def builder(cmd: String, printLogs: Boolean, args: String*) = {
+    ProcessBuilder("bazel", cmd :: List("--noshow_loading_progress", "--noshow_progress").filter(_ => !printLogs) ++ args.toList)
       .withWorkingDirectory(rootDir)
   }
 
   def runAndParse[A <: GeneratedMessage](cmd: String, args: String*)(implicit ev: GeneratedMessageCompanion[A]): IO[A] = {
-    run(builder(cmd, args*))
+    run(builder(cmd, printLogs = false, args*))
       .use { proc =>
         fs2.io
           .toInputStreamResource(proc.stdout)
@@ -44,9 +44,15 @@ class BazelAPI(rootDir: Path) {
   def query(q: Query): IO[build.QueryResult] =
     runAndParse[build.QueryResult]("query", q.render, "--output=proto")
 
-  def aquery(q: AnyQuery): IO[analysis_v2.ActionGraphContainer] =
-    runAndParse[analysis_v2.ActionGraphContainer]("aquery", q.render, "--output=proto")
+  def aquery(q: AnyQuery, extra: String*): IO[analysis_v2.ActionGraphContainer] =
+    runAndParse[analysis_v2.ActionGraphContainer]("aquery", (q.render :: "--output=proto" :: extra.toList)*)
 
   def runBuild(cmds: String*): IO[Int] =
-    run(builder("build", cmds*)).use(_.exitValue)
+    run(builder("build", printLogs = true, cmds*)).use(p =>
+      Stream
+        .eval(p.exitValue)
+        .concurrently(p.stdout.through(fs2.text.utf8.decode).evalMap(IO.print))
+        .compile
+        .lastOrError
+    )
 }
