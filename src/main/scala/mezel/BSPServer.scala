@@ -45,7 +45,7 @@ object Tasks {
         (targets.toList ++ List(
           "--aspects",
           "//aspects:aspect.bzl%mezel_aspect",
-          "--output_groups=bsp_info"
+          "--output_groups=bsp_info,bsp_info_deps"
         )): _*
       )
       .void

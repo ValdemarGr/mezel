@@ -52,6 +52,7 @@ class BazelAPI(rootDir: Path) {
       Stream
         .eval(p.exitValue)
         .concurrently(p.stdout.through(fs2.text.utf8.decode).evalMap(IO.print))
+        .concurrently(p.stderr.through(fs2.text.utf8.decode).evalMap(IO.print))
         .compile
         .lastOrError
     )
