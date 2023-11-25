@@ -290,7 +290,7 @@ class BspServerOps(state: SignallingRef[IO, BspState])(implicit R: Raise[IO, Bsp
                   s"-P:semanticdb:targetroot:${sco.targetroot}",
                   "-Xplugin-require:semanticdb",
                   s"-Xplugin:${r / "bazel-gateway" / Path(sco.semanticdbPlugin)}"
-                ),
+                ) ++ sco.plugins.map(x => s"-Xplugin:${r / Path(x)}"),
                 sco.classpath.map(x => pathToUri(r / Path(x))),
                 sco.semanticdbPlugin
               )

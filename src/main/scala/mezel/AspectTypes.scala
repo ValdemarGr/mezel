@@ -6,6 +6,7 @@ import io.circe._
 object AspectTypes {
   final case class ScalacOptions(
       scalacopts: List[String],
+      plugins: List[String],
       semanticdbPlugin: String,
       classpath: List[String],
       targetroot: String,

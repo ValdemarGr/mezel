@@ -57,10 +57,14 @@ def _mezel_aspect(target, ctx):
   transitive_source_jars = target[JavaInfo].transitive_source_jars.to_list()
   src_jars = [x.path for x in transitive_source_jars]# if x not in ignored_lst]
 
+  raw_plugins = attrs.plugins if attrs.plugins else []
+  plugins = [y.path for x in raw_plugins if JavaInfo in x for y in x[JavaInfo].compile_jars.to_list()]
+
   scalac_options_file = ctx.actions.declare_file("{}_bsp_scalac_options.json".format(target.label.name))
   scalac_options_content = struct(
     scalacopts= opts,
     semanticdbPlugin= semanticdb_plugin,
+    plugins= plugins,
     classpath= cp_jars,
     targetroot= semanticdb_target_root,
   )
@@ -117,7 +121,7 @@ def _mezel_aspect(target, ctx):
         transitive = [
           target[JavaInfo].transitive_compile_time_jars,
           target[JavaInfo].transitive_source_jars
-        ]
+        ] + [x[JavaInfo].compile_jars for x in raw_plugins]
       )
     ),
     BuildTargetInfo(output = files)
