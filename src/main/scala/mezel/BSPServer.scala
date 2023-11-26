@@ -164,8 +164,8 @@ class BspServerOps(state: SignallingRef[IO, BspState])(implicit R: Raise[IO, Bsp
   def initalize(msg: InitializeBuildParams): IO[Option[Json]] =
     state
       .update(_.copy(workspaceRoot = Some(msg.rootUri)))
-      .as:
-        Some:
+      .as {
+        Some {
           InitializeBuildResult(
             displayName = "Mezel",
             version = "1.0.0",
@@ -186,6 +186,8 @@ class BspServerOps(state: SignallingRef[IO, BspState])(implicit R: Raise[IO, Bsp
               canReload = Some(false) // what does this mean?
             )
           ).asJson
+        }
+      }
 
   // todo optimize
   def dependencySources(targets: List[SafeUri]): IO[Option[Json]] =
@@ -261,44 +263,46 @@ class BspServerOps(state: SignallingRef[IO, BspState])(implicit R: Raise[IO, Bsp
     }
 
   def buildTargets: IO[Option[Json]] =
-    workspaceRoot
-      .flatMap(BuildTargetCache.build)
-      .flatMap(btc => state.update(_.copy(buildTargetCache = Some(btc)))) >>
-      readBuildTargets.map { bts =>
-        val targets = bts.toList.map { case (label, bt) =>
-          BuildTarget(
-            id = BuildTargetIdentifier(pathToUri(Path(label))),
-            displayName = Some(label),
-            baseDirectory = Some(pathToUri(Path(bt.directory))),
-            tags = List("library"),
-            languageIds = List("scala"),
-            dependencies = bt.deps.map(x => BuildTargetIdentifier(pathToUri(Path(x)))),
-            capabilities = BuildTargetCapabilities(
-              canCompile = Some(true),
-              canTest = Some(false),
-              canRun = Some(false),
-              canDebug = Some(false)
-            ),
-            dataKind = Some("scala"),
-            data = Some {
-              ScalaBuildTarget(
-                scalaOrganization = "org.scala-lang",
-                scalaVersion = "2.13.12",
-                scalaBinaryVersion = "2.13",
-                platform = 1,
-                jars = bt.scalaCompilerClasspath.map(Path(_)).map(pathToUri),
-                jvmBuildTarget = Some {
-                  JvmBuildTarget(
-                    javaHome = Some(SafeUri("file:///nix/store/7c2ksq340xg06jmym46fzd0rbxphlzm3-openjdk-19.0.2+7/lib/openjdk/")),
-                    javaVersion = None
-                  )
-                }
-              )
-            }
-          )
+    workspaceRoot.flatMap { wsr =>
+      val r = uriToPath(wsr)
+      BuildTargetCache.build(wsr).flatMap(btc => state.update(_.copy(buildTargetCache = Some(btc)))) >>
+        readBuildTargets.map { bts =>
+          val targets = bts.toList.map { case (label, bt) =>
+            BuildTarget(
+              id = BuildTargetIdentifier(pathToUri(Path(label))),
+              displayName = Some(label),
+              baseDirectory = Some(pathToUri(Path(bt.directory))),
+              tags = List("library"),
+              languageIds = List("scala"),
+              dependencies = bt.deps.map(x => BuildTargetIdentifier(pathToUri(Path(x)))),
+              capabilities = BuildTargetCapabilities(
+                canCompile = Some(true),
+                canTest = Some(false),
+                canRun = Some(false),
+                canDebug = Some(false)
+              ),
+              dataKind = Some("scala"),
+              data = Some {
+                ScalaBuildTarget(
+                  scalaOrganization = "org.scala-lang",
+                  scalaVersion = bt.compilerVersion.toVersion,
+                  scalaBinaryVersion = s"${bt.compilerVersion.major}.${bt.compilerVersion.minor}",
+                  platform = 1,
+                  jars = bt.scalaCompilerClasspath.map(Path(_)).map(pathToUri),
+                  jvmBuildTarget = Some {
+                    JvmBuildTarget(
+                      javaHome = Some(pathToUri(r / "bazel-gateway" / Path(bt.javaHome))),
+                      javaVersion = None
+                    )
+                  }
+                )
+              }
+            )
+          }
+
+          Some {
+            WorkspaceBuildTargetsResult(targets = targets).asJson
+          }
         }
-        Some {
-          WorkspaceBuildTargetsResult(targets = targets).asJson
-        }
-      }
+    }
 }

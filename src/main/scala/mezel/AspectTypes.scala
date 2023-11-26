@@ -21,6 +21,7 @@ object AspectTypes {
   ) derives Decoder
 
   final case class BuildTarget(
+      javaHome: String,
       scalaCompilerClasspath: List[String],
       compilerVersion: ScalaVersion,
       deps: List[String],

@@ -24,7 +24,7 @@ object Main extends IOApp.Simple {
     SignallingRef.of[IO, BspState](BspState.empty).flatMap { state =>
       Catch.ioCatch.flatMap { implicit C =>
         Files[IO]
-          .tail(Path("/tmp/from-metals"))
+          .tail(Path("/tmp/from-metals"), pollDelay = 50.millis)
           .through(fs2.text.utf8.decode)
           .evalTap(x => IO.println(s"Received: $x"))
           .through(jsonRpcRequests)
@@ -34,9 +34,6 @@ object Main extends IOApp.Simple {
               IO.fromOption(x.params)(new RuntimeException(s"No params for method ${x.method}"))
                 .map(_.as[A])
                 .rethrow
-
-              // def id: IO[RpcId] =
-              //   IO.fromOption(x.id)(new RuntimeException(s"No id for method ${x.method}"))
 
             C.use[BspResponseError] { implicit R =>
               val ops: BspServerOps = new BspServerOps(state)
@@ -78,9 +75,6 @@ object Main extends IOApp.Simple {
           }
           .unNone
           .map(_.asJson.spaces2)
-          .map { x =>
-            println(x.split("\n").toList.take(10)); x
-          }
           .map(data => s"Content-Length: ${data.length}\r\n\r\n$data")
           .through(fs2.text.utf8.encode)
           .through(Files[IO].writeAll(Path("/tmp/to-metals")))
@@ -88,29 +82,6 @@ object Main extends IOApp.Simple {
           .drain
       }
     }
-    // BazelAPI(Path("."))
-    //   .aquery {
-    //     dsl.kind("scala_library") {
-    //       dsl.deps("//...")
-    //     }
-    //   }
-    //   .flatMap { x =>
-    //     IO.println(x.artifacts.take(100).mkString("\n")) *>
-    //       IO.println(x.actions.take(100).mkString("\n")) *>
-    //       IO.println(x.targets.take(100).mkString("\n")) *>
-    //       IO.println(x.depSetOfFiles.take(100).mkString("\n")) *>
-    //       IO.println(x.configuration.take(100).mkString("\n")) *>
-    //       IO.println(x.aspectDescriptors.take(100).mkString("\n")) *>
-    //       IO.println(x.ruleClasses.take(100).mkString("\n")) *>
-    //       IO.println(x.pathFragments.take(100).mkString("\n"))
-    //   }
-  /*
-    BazelAPI(Path("."))
-      .query {
-        dsl.kind("scala_library") {
-          dsl.deps("//...")
-        }
-      }.map(_.target.take(100)).flatMap(x => IO(println(x.mkString("\n")))) */
 }
 
 enum ParserState:

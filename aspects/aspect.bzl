@@ -11,6 +11,8 @@ BuildTargetInfo = provider(
 def _mezel_aspect(target, ctx):
   attrs = ctx.rule.attr
 
+  jdk = ctx.attr._jdk
+
   if ctx.rule.kind != "scala_library":
     return []
 
@@ -78,6 +80,7 @@ def _mezel_aspect(target, ctx):
 
   build_target_file = ctx.actions.declare_file("{}_bsp_build_target.json".format(target.label.name))
   build_target_content = struct(
+    javaHome = jdk[java_common.JavaRuntimeInfo].java_home,
     scalaCompilerClasspath= [x.path for x in scala_compile_classpath],
     compilerVersion= compiler_version,
     deps = [str(x.label) for x in dep_outputs],
@@ -131,7 +134,15 @@ mezel_aspect = aspect(
   implementation = _mezel_aspect,
   attr_aspects = ["deps"],
   required_aspect_providers = [[JavaInfo, SemanticdbInfo]],
-  toolchains = ["@io_bazel_rules_scala//scala:toolchain_type"],
+  attrs = {
+    "_jdk": attr.label(
+        default = Label("@bazel_tools//tools/jdk:current_java_runtime"),
+        providers = [java_common.JavaRuntimeInfo],
+    ),
+  },
+  toolchains = [
+    "@io_bazel_rules_scala//scala:toolchain_type",
+  ],
 )
 
 mezel_config = rule(
@@ -143,5 +154,7 @@ mezel_config = rule(
       providers = [JavaInfo, SemanticdbInfo]
     )
   },
-  toolchains = ["@io_bazel_rules_scala//scala:toolchain_type"],
+  toolchains = [
+    "@io_bazel_rules_scala//scala:toolchain_type",
+  ],
 )
