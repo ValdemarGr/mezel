@@ -14,7 +14,7 @@ http_archive(
 The Mezel aspect will be on the path `@mezel//aspects:aspect.bzl`.
 
 Now we need a bsp config and the actual bsp server binary.
-The mezel archive ships with a rule that fetches the bsp server binary and another that generates the bsp config.
+The mezel archive ships with a rule that generates a bsp config.
 
 Here is an example of a bsp config for mezel:
 ```json
@@ -29,10 +29,10 @@ Here is an example of a bsp config for mezel:
 
 To use the bazel rules to generate the config:
 ```bash
-bazel run @mezel//rules:gen_bsp_config -- . # the dot (.) is the working directory
+bazel run @mezel//rules:gen_bsp_config
 ```
 
-And to fetch the bsp server binary (if you fail to do this, the bsp server will not be found):
+If you want to specify the folder to create the config in:
 ```bash
-bazel run @mezel//rules:fetch_bsp_server -- . # the dot (.) is the working directory
+bazel run @mezel//rules:gen_bsp_config /path/to/workspace
 ```

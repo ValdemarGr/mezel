@@ -1,0 +1,5 @@
+load(":write_bsp_build_config.bzl", "write_bsp_build_config")
+
+write_bsp_build_config(
+  name = "gen_bsp_config"
+)
