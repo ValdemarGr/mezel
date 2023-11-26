@@ -24,7 +24,7 @@ import scalapb._
 
 class BazelAPI(rootDir: Path) {
   def run(pb: ProcessBuilder): Resource[IO, Process[IO]] =
-    Resource.eval(IO.println(s"running bazel command: ${pb.command} ${pb.args.map(x => s"'$x'").mkString(" ")}")) >>
+    // Resource.eval(IO.println(s"running bazel command: ${pb.command} ${pb.args.map(x => s"'$x'").mkString(" ")}")) >>
       pb.spawn[IO]
 
   def builder(cmd: String, printLogs: Boolean, args: String*) = {

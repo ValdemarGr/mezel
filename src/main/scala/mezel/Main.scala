@@ -21,19 +21,35 @@ import catcheffect.*
 import fs2.concurrent.Channel
 import cats.effect.std.Supervisor
 
-object Main extends IOApp.Simple {
-  def run: IO[Unit] =
+object Main extends IOApp {
+  def run(args: List[String]): IO[ExitCode] = {
+    if (args.contains("--filesystem")) {
+      runWithIO(
+        Files[IO].readAll(Path("/tmp/from-metals")),
+        Files[IO].writeAll(Path("/tmp/to-metals"))
+      )
+    } else {
+      runWithIO(
+        fs2.io.stdin[IO](4096),
+        fs2.io.stdout[IO]
+      )
+    }
+  }.as(ExitCode.Success)
+
+  def runWithIO(
+      read: Stream[IO, Byte],
+      write: Pipe[IO, Byte, Unit]
+  ): IO[Unit] =
     SignallingRef.of[IO, BspState](BspState.empty).flatMap { state =>
       Catch.ioCatch.flatMap { implicit C =>
         C.use[Unit] { Exit =>
           Channel.bounded[IO, Json](64).flatMap { output =>
             val ioStream: Stream[IO, Unit] = {
-              Files[IO]
-                .tail(Path("/tmp/from-metals"), pollDelay = 50.millis)
+              read
                 .through(fs2.text.utf8.decode)
-                .evalTap(x => IO.println(s"Received: data of size ${x.size}"))
+                // .evalTap(x => IO.println(s"Received: data of size ${x.size}"))
                 .through(jsonRpcRequests)
-                .evalTap(x => IO.println(s"Request: ${x.method}"))
+                // .evalTap(x => IO.println(s"Request: ${x.method}"))
                 .evalMap { x =>
                   Supervisor[IO](await = true).use { sup =>
                     IO.deferred[Unit].flatMap { done =>
@@ -94,7 +110,7 @@ object Main extends IOApp.Simple {
               .map(_.spaces2)
               .map(data => s"Content-Length: ${data.length}\r\n\r\n$data")
               .through(fs2.text.utf8.encode)
-              .through(Files[IO].writeAll(Path("/tmp/to-metals")))
+              .through(write)
               .compile
               .drain
           }

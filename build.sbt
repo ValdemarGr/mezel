@@ -64,28 +64,28 @@ lazy val root = project
   .settings(sharedSettings)
   .settings(
     name := "mezel",
-    fork := true,
-    graalVMNativeImageOptions ++= Seq(
-      "--initialize-at-build-time",
-      "--no-fallback"
-    ),
     Compile / PB.targets := Seq(
       scalapb.gen(scala3Sources = true) -> (Compile / sourceManaged).value / "scalapb"
     ),
     libraryDependencies ++= Seq(
       "com.thesamet.scalapb" %% "scalapb-runtime" % scalapb.compiler.Version.scalapbVersion % "protobuf"
-    )
-  )
-
-lazy val dev = project
-  .in(file("dev"))
-  .dependsOn(root)
-  .settings(sharedSettings)
-  .settings(
-    name := "mezel",
+    ),
     fork := true,
     graalVMNativeImageOptions ++= Seq(
       "--initialize-at-build-time",
       "--no-fallback"
     )
-  ).enablePlugins(GraalVMNativeImagePlugin)
+  )
+
+lazy val filesystemIO = project
+  .in(file("filesystem-io"))
+  .settings(sharedSettings)
+  .settings(
+    name := "mezel-filesystem-io",
+    fork := true,
+    graalVMNativeImageOptions ++= Seq(
+      "--initialize-at-build-time",
+      "--no-fallback"
+    )
+  )
+  .enablePlugins(GraalVMNativeImagePlugin)
