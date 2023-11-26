@@ -74,7 +74,9 @@ lazy val root = project
     graalVMNativeImageOptions ++= Seq(
       "--initialize-at-build-time",
       "--no-fallback"
-    )
+    ),
+    assembly / mainClass := Some("mezel.Main"),
+    assembly / assemblyOutputPath := file("target/mezel.jar")
   )
 
 lazy val filesystemIO = project

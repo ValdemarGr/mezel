@@ -16,9 +16,12 @@ jobs:
       - uses: DeterminateSystems/nix-installer-action@main
       - uses: DeterminateSystems/magic-nix-cache-action@main
       - run: nix flake check
-      - run: nix develop --command sbt root/graalvm-native-image:packageBin && cp target/graalvm-native-image/mezel mezel-x86_64-linux
+      - run: nix develop --command sbt root/graalvm-native-image:packageBin
+      - run: cp target/graalvm-native-image/mezel mezel-x86_64-linux
+      - run: cp target/mezel.jar mezel.jar
       - uses: softprops/action-gh-release@v1
         if: startsWith(github.ref, 'refs/tags/v')
         with:
           files: |
             mezel-x86_64-linux
+            mezel.jar
