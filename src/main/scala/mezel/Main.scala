@@ -25,7 +25,7 @@ object Main extends IOApp.Simple {
     SignallingRef.of[IO, BspState](BspState.empty).flatMap { state =>
       Catch.ioCatch.flatMap { implicit C =>
         C.use[Unit] { Exit =>
-          Channel.bounded[IO, Json](64).flatMap { chan =>
+          Channel.bounded[IO, (String, Json)](64).flatMap { chan =>
             val ioStream =
               Files[IO]
                 .tail(Path("/tmp/from-metals"), pollDelay = 50.millis)
@@ -62,7 +62,7 @@ object Main extends IOApp.Simple {
                       case "buildTarget/compile" =>
                         expect[CompileParams].flatMap(p => ops.compile(p.targets.map(_.uri)))
                       case "build/exit" => Exit.raise(())
-                      case m => IO.raiseError(new RuntimeException(s"Unknown method: $m"))
+                      case m            => IO.raiseError(new RuntimeException(s"Unknown method: $m"))
                     }
                   }.map {
                     case Left(err)    => Some(Response("2.0", x.id, None, Some(err.responseError)))
@@ -79,7 +79,7 @@ object Main extends IOApp.Simple {
                 .map(_.asJson)
 
             ioStream
-              .merge(chan.stream)
+              .merge(chan.stream.map { case (method, params) => Notification("2.0", method, Some(params)).asJson })
               .map(_.spaces2)
               .map(data => s"Content-Length: ${data.length}\r\n\r\n$data")
               .through(fs2.text.utf8.encode)
@@ -185,6 +185,12 @@ final case class Response(
     id: Option[RpcId],
     result: Option[Json],
     error: Option[ResponseError]
+) derives Codec.AsObject
+
+final case class Notification(
+    jsonrpc: String,
+    method: String,
+    params: Option[Json]
 ) derives Codec.AsObject
 
 final case class ResponseError(

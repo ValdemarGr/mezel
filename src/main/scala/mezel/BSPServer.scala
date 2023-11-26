@@ -229,7 +229,7 @@ def convertDiagnostic(target: BuildTargetIdentifier, tds: diagnostics.TargetDiag
 
 class BspServerOps(
     state: SignallingRef[IO, BspState],
-    outChan: Channel[IO, Json]
+    outChan: Channel[IO, (String, Json)]
 )(implicit R: Raise[IO, BspResponseError]) {
   import _root_.io.circe.syntax.*
 
@@ -324,7 +324,8 @@ class BspServerOps(
           val interesting = ys.filter { case (label, _) => labels.contains(label) }
           interesting.traverse_ { case (l, td) =>
             val ds = convertDiagnostic(BuildTargetIdentifier(pathToUri(Path(l))), td)
-            ds.traverse_(pd => outChan.send(pd.asJson).void)
+            println(s"publishing diagnostics for ${l} ${ds}")
+            ds.traverse_(pd => outChan.send("build/publishDiagnostics" -> pd.asJson).void)
           }
         }
       }
