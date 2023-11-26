@@ -172,7 +172,11 @@ object BspState {
   val empty: BspState = BspState(None, None)
 }
 
-def convertDiagnostic(target: BuildTargetIdentifier, tds: diagnostics.TargetDiagnostics): List[PublishDiagnosticsParams] = {
+def convertDiagnostic(
+    root: SafeUri,
+    target: BuildTargetIdentifier,
+    tds: diagnostics.TargetDiagnostics
+): List[PublishDiagnosticsParams] = {
   tds.diagnostics.groupBy(_.path).toList.map { case (p, fds) =>
     val ds = fds.flatMap(_.diagnostics).toList.map { d =>
       val rng = d.range.get
@@ -217,8 +221,12 @@ def convertDiagnostic(target: BuildTargetIdentifier, tds: diagnostics.TargetDiag
       )
     }
 
+    val r = uriToPath(root)
+    val fixedTextDocumentRef = p.replace("workspace-root://", "")
+    println(p)
+    println(fixedTextDocumentRef)
     PublishDiagnosticsParams(
-      textDocument = TextDocumentIdentifier(SafeUri(p)),
+      textDocument = TextDocumentIdentifier(pathToUri(r / Path(fixedTextDocumentRef))),
       buildTarget = target,
       originId = None,
       diagnostics = ds,
@@ -323,7 +331,7 @@ class BspServerOps(
           val labels = xs.map { case (id, _) => id }.toSet
           val interesting = ys.filter { case (label, _) => labels.contains(label) }
           interesting.traverse_ { case (l, td) =>
-            val ds = convertDiagnostic(BuildTargetIdentifier(pathToUri(Path(l))), td)
+            val ds = convertDiagnostic(wsr, BuildTargetIdentifier(pathToUri(Path(l))), td)
             println(s"publishing diagnostics for ${l} ${ds}")
             ds.traverse_(pd => outChan.send("build/publishDiagnostics" -> pd.asJson).void)
           }

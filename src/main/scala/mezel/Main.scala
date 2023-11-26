@@ -61,8 +61,8 @@ object Main extends IOApp.Simple {
                         IO.pure(Some(ScalaTestClassesResult(Nil).asJson))
                       case "buildTarget/compile" =>
                         expect[CompileParams].flatMap(p => ops.compile(p.targets.map(_.uri)))
-                      case "build/exit" => Exit.raise(())
-                      case m            => IO.raiseError(new RuntimeException(s"Unknown method: $m"))
+                      case "build/exit" | "build/exit" => Exit.raise(())
+                      case m                           => IO.raiseError(new RuntimeException(s"Unknown method: $m"))
                     }
                   }.map {
                     case Left(err)    => Some(Response("2.0", x.id, None, Some(err.responseError)))
