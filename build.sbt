@@ -6,6 +6,7 @@ ThisBuild / organization := "io.github.valdemargr"
 ThisBuild / tlBaseVersion := "0.0"
 ThisBuild / tlUntaggedAreSnapshots := false
 ThisBuild / tlSonatypeUseLegacyHost := true
+ThisBuild / tlFatalWarnings := false
 
 ThisBuild / licenses := List(
   "Apache-2.0" -> url("http://www.apache.org/licenses/LICENSE-2.0")
