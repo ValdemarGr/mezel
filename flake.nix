@@ -42,6 +42,7 @@
     ${pkgs.coreutils}/bin/mkdir -p ''${PWD}/src/main/protobuf/src/main/protobuf
     ${pkgs.wget}/bin/wget -O ''${PWD}/src/main/protobuf/src/main/protobuf/build.proto https://raw.githubusercontent.com/bazelbuild/bazel/f906d02543f83d9aee914f72bf89e51c293c2506/src/main/protobuf/build.proto
     ${pkgs.wget}/bin/wget -O ''${PWD}/src/main/protobuf/src/main/protobuf/analysis_v2.proto https://raw.githubusercontent.com/bazelbuild/bazel/f906d02543f83d9aee914f72bf89e51c293c2506/src/main/protobuf/analysis_v2.proto
+    ${pkgs.wget}/bin/wget -O ''${PWD}/src/main/protobuf/src/main/protobuf/diagnostics.proto https://raw.githubusercontent.com/bazelbuild/rules_scala/9c0f6b942b2a2555c41b622b41280a45bf7cb92e/src/protobuf/io/bazel/rules_scala/diagnostics.proto
     '';
   in
   {
