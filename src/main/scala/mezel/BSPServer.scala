@@ -22,6 +22,7 @@ import alleycats.*
 import java.nio.file.Paths
 import java.net.URI
 import com.google.devtools.build.lib.analysis.analysis_v2.PathFragment
+import fs2.concurrent.Channel
 
 enum BspResponseError(val code: Int, val message: String, val data: Option[Json] = None):
   case NotInitialized extends BspResponseError(-32002, "Server not initialized")
@@ -151,7 +152,10 @@ object BspState {
   val empty: BspState = BspState(None, None)
 }
 
-class BspServerOps(state: SignallingRef[IO, BspState])(implicit R: Raise[IO, BspResponseError]) {
+class BspServerOps(
+  state: SignallingRef[IO, BspState],
+  outChan: Channel[IO, Json]
+)(implicit R: Raise[IO, BspResponseError]) {
   import _root_.io.circe.syntax.*
 
   // for now we just compile

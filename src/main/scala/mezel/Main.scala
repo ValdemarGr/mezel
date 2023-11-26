@@ -18,68 +18,76 @@ import _root_.io.circe.Json
 import cats.data.*
 import fs2.concurrent.SignallingRef
 import catcheffect.*
+import fs2.concurrent.Channel
 
 object Main extends IOApp.Simple {
   def run: IO[Unit] =
     SignallingRef.of[IO, BspState](BspState.empty).flatMap { state =>
       Catch.ioCatch.flatMap { implicit C =>
-        Files[IO]
-          .tail(Path("/tmp/from-metals"), pollDelay = 50.millis)
-          .through(fs2.text.utf8.decode)
-          .evalTap(x => IO.println(s"Received: $x"))
-          .through(jsonRpcRequests)
-          .evalTap(x => IO.println(s"Request: $x"))
-          .evalMap { x =>
-            def expect[A: Decoder]: IO[A] =
-              IO.fromOption(x.params)(new RuntimeException(s"No params for method ${x.method}"))
-                .map(_.as[A])
-                .rethrow
+        Channel.bounded[IO, Json](64).flatMap { chan =>
+          val ioStream =
+            Files[IO]
+              .tail(Path("/tmp/from-metals"), pollDelay = 50.millis)
+              .through(fs2.text.utf8.decode)
+              .evalTap(x => IO.println(s"Received: $x"))
+              .through(jsonRpcRequests)
+              .evalTap(x => IO.println(s"Request: $x"))
+              .evalMap { x =>
+                def expect[A: Decoder]: IO[A] =
+                  IO.fromOption(x.params)(new RuntimeException(s"No params for method ${x.method}"))
+                    .map(_.as[A])
+                    .rethrow
 
-            C.use[BspResponseError] { implicit R =>
-              val ops: BspServerOps = new BspServerOps(state)
+                C.use[BspResponseError] { implicit R =>
+                  val ops: BspServerOps = new BspServerOps(state, chan)
 
-              x.method match {
-                case "build/initialize"       => expect[InitializeBuildParams].flatMap(ops.initalize)
-                case "build/initialized"      => IO.pure(None)
-                case "workspace/buildTargets" => ops.buildTargets
-                case "buildTarget/scalacOptions" =>
-                  expect[ScalacOptionsParams].flatMap(p => ops.scalacOptions(p.targets.map(_.uri)))
-                case "buildTarget/javacOptions" => IO.pure(Some(ScalacOptionsResult(Nil).asJson))
-                case "buildTarget/sources" =>
-                  expect[SourcesParams].flatMap(sps => ops.sources(sps.targets.map(_.uri)))
-                case "buildTarget/dependencySources" =>
-                  // IO.pure(Some(DependencySourcesResult(Nil).asJson))
-                  expect[DependencySourcesParams].flatMap(dsp => ops.dependencySources(dsp.targets.map(_.uri)))
-                case "buildTarget/scalaMainClasses" =>
-                  IO.pure(Some(ScalaMainClassesResult(Nil, None).asJson))
-                case "buildTarget/jvmRunEnvironment" =>
-                  IO.pure(Some(JvmRunEnvironmentResult(Nil).asJson))
-                case "buildTarget/scalaTestClasses" =>
-                  IO.pure(Some(ScalaTestClassesResult(Nil).asJson))
-                case "buildTarget/compile"           => 
-                  expect[CompileParams].flatMap(p => ops.compile(p.targets.map(_.uri)))
-                // case "build/taskStart"               => ???
-                // case "build/taskProgress"            => ???
-                case m => IO.raiseError(new RuntimeException(s"Unknown method: $m"))
-              }
-            }.map {
-              case Left(err)    => Some(Response("2.0", x.id, None, Some(err.responseError)))
-              case Right(value) =>
-                // if id is defined always respond
-                // if id is not defined only respond if value is defined
-                x.id match {
-                  case Some(id) => Some(Response("2.0", Some(id), value, None))
-                  case None     => value.map(j => Response("2.0", None, Some(j), None))
+                  x.method match {
+                    case "build/initialize"       => expect[InitializeBuildParams].flatMap(ops.initalize)
+                    case "build/initialized"      => IO.pure(None)
+                    case "workspace/buildTargets" => ops.buildTargets
+                    case "buildTarget/scalacOptions" =>
+                      expect[ScalacOptionsParams].flatMap(p => ops.scalacOptions(p.targets.map(_.uri)))
+                    case "buildTarget/javacOptions" => IO.pure(Some(ScalacOptionsResult(Nil).asJson))
+                    case "buildTarget/sources" =>
+                      expect[SourcesParams].flatMap(sps => ops.sources(sps.targets.map(_.uri)))
+                    case "buildTarget/dependencySources" =>
+                      // IO.pure(Some(DependencySourcesResult(Nil).asJson))
+                      expect[DependencySourcesParams].flatMap(dsp => ops.dependencySources(dsp.targets.map(_.uri)))
+                    case "buildTarget/scalaMainClasses" =>
+                      IO.pure(Some(ScalaMainClassesResult(Nil, None).asJson))
+                    case "buildTarget/jvmRunEnvironment" =>
+                      IO.pure(Some(JvmRunEnvironmentResult(Nil).asJson))
+                    case "buildTarget/scalaTestClasses" =>
+                      IO.pure(Some(ScalaTestClassesResult(Nil).asJson))
+                    case "buildTarget/compile" =>
+                      expect[CompileParams].flatMap(p => ops.compile(p.targets.map(_.uri)))
+                    // case "build/taskStart"               => ???
+                    // case "build/taskProgress"            => ???
+                    case m => IO.raiseError(new RuntimeException(s"Unknown method: $m"))
+                  }
+                }.map {
+                  case Left(err)    => Some(Response("2.0", x.id, None, Some(err.responseError)))
+                  case Right(value) =>
+                    // if id is defined always respond
+                    // if id is not defined only respond if value is defined
+                    x.id match {
+                      case Some(id) => Some(Response("2.0", Some(id), value, None))
+                      case None     => value.map(j => Response("2.0", None, Some(j), None))
+                    }
                 }
-            }
-          }
-          .unNone
-          .map(_.asJson.spaces2)
-          .map(data => s"Content-Length: ${data.length}\r\n\r\n$data")
-          .through(fs2.text.utf8.encode)
-          .through(Files[IO].writeAll(Path("/tmp/to-metals")))
-          .compile
-          .drain
+              }
+              .unNone
+              .map(_.asJson)
+
+            ioStream
+              .merge(chan.stream)
+              .map(_.spaces2)
+              .map(data => s"Content-Length: ${data.length}\r\n\r\n$data")
+              .through(fs2.text.utf8.encode)
+              .through(Files[IO].writeAll(Path("/tmp/to-metals")))
+              .compile
+              .drain
+        }
       }
     }
 }
@@ -426,10 +434,10 @@ object StatusCode:
   case object Cancelled extends StatusCode
 
   given Decoder[StatusCode] = Decoder[Int].emap:
-    case 1        => Right(Ok)
+    case 1     => Right(Ok)
     case 2     => Right(Error)
-    case 3 => Right(Cancelled)
-    case other       => Left(s"Unknown StatusCode: $other")
+    case 3     => Right(Cancelled)
+    case other => Left(s"Unknown StatusCode: $other")
 
   given Encoder[StatusCode] = Encoder[Int].contramap:
     case Ok        => 1
