@@ -46,16 +46,10 @@ def _mezel_aspect(target, ctx):
     for x in attrs.deps if BuildTargetInfo in x 
   ]
 
-  # ignored = depset(
-  #   target[JavaInfo].source_jars, 
-  #   transitive = [target[JavaInfo].compile_jars] + [x.ignored for x in dep_outputs]
-  # )
-  # ignored_lst = ignored.to_list()
-
   transitive_compile_jars = target[JavaInfo].transitive_compile_time_jars.to_list()
-  cp_jars = [x.path for x in transitive_compile_jars]# if x not in ignored_lst]
+  cp_jars = [x.path for x in transitive_compile_jars]
   transitive_source_jars = target[JavaInfo].transitive_source_jars.to_list()
-  src_jars = [x.path for x in transitive_source_jars]# if x not in ignored_lst]
+  src_jars = [x.path for x in transitive_source_jars]
 
   raw_plugins = attrs.plugins if attrs.plugins else []
   plugins = [y.path for x in raw_plugins if JavaInfo in x for y in x[JavaInfo].compile_jars.to_list()]
@@ -97,12 +91,7 @@ def _mezel_aspect(target, ctx):
   )
 
   files = struct(
-    label = target.label,
-    # ignored = ignored
-    # scalac_options_file = scalac_options_file,
-    # sources_file = sources_file,
-    # dependency_sources_file = dependency_sources_file,
-    # build_target_file = build_target_file
+    label = target.label
   )
 
   transitive_output_files = [

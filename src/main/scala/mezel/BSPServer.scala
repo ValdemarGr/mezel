@@ -28,9 +28,41 @@ enum BspResponseError(val code: Int, val message: String, val data: Option[Json]
 
   def responseError: ResponseError = ResponseError(code, message, data)
 
+final case class BuildTargetCache(
+    buildTargets: List[(String, Tasks.BuildTargetFiles)],
+    memoBuildTargets: IO[Map[String, AspectTypes.BuildTarget]],
+    memoScalacOptions: IO[Map[String, AspectTypes.ScalacOptions]],
+    memoSources: IO[Map[String, AspectTypes.Sources]],
+    memoDependencySources: IO[Map[String, AspectTypes.DependencySources]]
+)
+
+object BuildTargetCache {
+  def fromTargets(buildTargets: List[(String, Tasks.BuildTargetFiles)]): IO[BuildTargetCache] = {
+    def mk[A: Decoder](f: Tasks.BuildTargetFiles => Path) =
+      buildTargets
+        .parTraverse { case (label, bt) =>
+          Files[IO].readAll(f(bt)).through(fs2.text.utf8.decode).compile.string.flatMap { str =>
+            IO.fromEither(_root_.io.circe.parser.decode[A](str)) tupleLeft label
+          }
+        }
+        .map(_.toMap)
+        .memoize
+    (
+      mk[AspectTypes.BuildTarget](_.buildTarget),
+      mk[AspectTypes.ScalacOptions](_.scalacOptions),
+      mk[AspectTypes.Sources](_.sources),
+      mk[AspectTypes.DependencySources](_.dependencySources)
+    ).mapN(BuildTargetCache(buildTargets, _, _, _, _))
+  }
+
+  def build(root: SafeUri): IO[BuildTargetCache] =
+    Tasks.buildTargetFiles(root).map(xs => xs.map(x => x.label -> x)).flatMap(fromTargets)
+}
+
 final case class BspState(
-    workspaceRoot: Option[SafeUri]
-) derives Empty
+    workspaceRoot: Option[SafeUri],
+    buildTargetCache: Option[BuildTargetCache]
+)
 
 def pathToUri(p: Path): SafeUri = SafeUri(s"file://${p.absolute.toString}")
 
@@ -58,27 +90,6 @@ object Tasks {
       dependencySources: Path,
       buildTarget: Path
   )
-
-  def buildTargetFile[A: Decoder](uri: SafeUri)(f: BuildTargetFiles => Path): IO[List[(String, A)]] =
-    buildTargetFiles(uri).flatMap { bts =>
-      bts.traverse { bt =>
-        Files[IO].readAll(f(bt)).through(fs2.text.utf8.decode).compile.string.flatMap { str =>
-          IO.fromEither(_root_.io.circe.parser.decode[A](str)) tupleLeft bt.label
-        }
-      }
-    }
-
-  def buildTargets(uri: SafeUri): IO[List[(String, AspectTypes.BuildTarget)]] =
-    buildTargetFile[AspectTypes.BuildTarget](uri)(_.buildTarget)
-
-  def scalacOptions(uri: SafeUri): IO[List[(String, AspectTypes.ScalacOptions)]] =
-    buildTargetFile[AspectTypes.ScalacOptions](uri)(_.scalacOptions)
-
-  def sources(uri: SafeUri): IO[List[(String, AspectTypes.Sources)]] =
-    buildTargetFile[AspectTypes.Sources](uri)(_.sources)
-
-  def dependencySources(uri: SafeUri): IO[List[(String, AspectTypes.DependencySources)]] =
-    buildTargetFile[AspectTypes.DependencySources](uri)(_.dependencySources)
 
   def buildTargetFiles(uri: SafeUri): IO[List[BuildTargetFiles]] = {
     val api = BazelAPI(uriToPath(uri))
@@ -121,11 +132,28 @@ object Tasks {
 }
 
 object BspState {
-  val empty: BspState = Empty[BspState].empty
+  val empty: BspState = BspState(None, None)
 }
 
 class BspServerOps(state: SignallingRef[IO, BspState])(implicit R: Raise[IO, BspResponseError]) {
   import _root_.io.circe.syntax.*
+
+  def readBuildTargetCache[A](f: BuildTargetCache => IO[Map[String, A]]): IO[Map[String, A]] =
+    state.get.flatMap { s =>
+      R.fromOption(BspResponseError.NotInitialized)(s.buildTargetCache).flatMap(f)
+    }
+
+  def readBuildTargets: IO[Map[String, AspectTypes.BuildTarget]] =
+    readBuildTargetCache(_.memoBuildTargets)
+
+  def readScalacOptions: IO[Map[String, AspectTypes.ScalacOptions]] =
+    readBuildTargetCache(_.memoScalacOptions)
+
+  def readSources: IO[Map[String, AspectTypes.Sources]] =
+    readBuildTargetCache(_.memoSources)
+
+  def readDependencySources: IO[Map[String, AspectTypes.DependencySources]] =
+    readBuildTargetCache(_.memoDependencySources)
 
   def get[A](f: BspState => Option[A])(err: BspState => BspResponseError): IO[A] =
     state.get.flatMap(s => R.fromOption(err(s))(f(s)))
@@ -160,13 +188,13 @@ class BspServerOps(state: SignallingRef[IO, BspState])(implicit R: Raise[IO, Bsp
           ).asJson
 
   // todo optimize
-  def dependencySources(targets: List[SafeUri]): IO[Option[Json]] = {
+  def dependencySources(targets: List[SafeUri]): IO[Option[Json]] =
     workspaceRoot.flatMap { wsr =>
-      Tasks.dependencySources(wsr).map { ds =>
+      readDependencySources.map { ds =>
         val r = uriToPath(wsr)
         Some {
           DependencySourcesResult {
-            ds.map { case (label, ds) =>
+            ds.toList.map { case (label, ds) =>
               DependencySourcesItem(
                 BuildTargetIdentifier(pathToUri(Path(label))),
                 ds.sourcejars.map(x => pathToUri(r / Path(x))).toList
@@ -176,55 +204,6 @@ class BspServerOps(state: SignallingRef[IO, BspState])(implicit R: Raise[IO, Bsp
         }
       }
     }
-    // regen.flatMap { qo =>
-    //   workspaceRoot.map(uriToPath).flatMap { root =>
-    //     val argSrcs =
-    //       qo.aqr.actions.flatMap(_.arguments.drop(1).filter(x => x.endsWith("-src.jar") || x.endsWith("-sources.jar"))).distinct.toList
-
-    //     val pathFrags = qo.aqr.pathFragments.map(p => p.id -> p).toMap
-    //     val arts = qo.aqr.artifacts.map(x => x.id -> x.pathFragmentId)
-    //     def buildPath(x: analysis_v2.PathFragment): Path = {
-    //       def go(x: analysis_v2.PathFragment): Eval[Path] = Eval.defer {
-    //         pathFrags.get(x.parentId).traverse(go(_)).map(_.map(_ / x.label).getOrElse(Path(x.label)))
-    //       }
-
-    //       go(x).value
-    //     }
-
-    //     val uniqueArtifacts = qo.aqr.artifacts.map(_.id)
-
-    //     val artifactToPath: Map[Int, PathFragment] = arts.map { case (id, p) => id -> pathFrags(p) }.toMap
-    //     val relevantPathRoots = uniqueArtifacts.reverse.zipWithIndex.mapFilter { case (x, i) =>
-    //       if (i % 50 == 0) println(s"artifact ${i}/ ${uniqueArtifacts.size}")
-    //       val r = artifactToPath(x)
-    //       if (r.label.endsWith("-src.jar") || r.label.endsWith("-sources.jar")) {
-    //         Some(r)
-    //       } else None
-    //     }
-
-    //     val outputSrcs = relevantPathRoots.map(buildPath).distinct.map(root / _)
-
-    //     val paths = (argSrcs.map(x => root / Path(x)) ++ outputSrcs).distinct
-
-    //     paths.filterA(Files[IO].exists).map { existing =>
-    //       val out = Some {
-    //         DependencySourcesResult {
-    //           targets.map { t =>
-    //             DependencySourcesItem(
-    //               BuildTargetIdentifier(t),
-    //               existing.map(pathToUri)
-    //             )
-    //           }
-    //         }.asJson
-    //       }
-
-    //       println("done with dependency sources")
-
-    //       out
-    //     }
-    //   }
-    // }
-  }
 
   def compile(targets: List[SafeUri]): IO[Option[Json]] =
     workspaceRoot.map(d => BazelAPI(uriToPath(d))).flatMap { api =>
@@ -242,11 +221,11 @@ class BspServerOps(state: SignallingRef[IO, BspState])(implicit R: Raise[IO, Bsp
 
   def sources(targets: List[SafeUri]): IO[Option[Json]] =
     workspaceRoot.flatMap { wsr =>
-      Tasks.sources(wsr).map { srcs =>
+      readSources.map { srcs =>
         val r = uriToPath(wsr)
         Some {
           SourcesResult {
-            srcs.map { case (label, src) =>
+            srcs.toList.map { case (label, src) =>
               SourcesItem(
                 BuildTargetIdentifier(pathToUri(Path(label))),
                 src.sources.map(x => pathToUri(r / Path(x))).map(SourceItem(_, SourceItemKind.File, false)).toList,
@@ -257,33 +236,14 @@ class BspServerOps(state: SignallingRef[IO, BspState])(implicit R: Raise[IO, Bsp
         }
       }
     }
-    // regen.flatMap { qo =>
-    //   workspaceRoot.map(uriToPath).map { root =>
-    //     Some {
-    //       SourcesResult {
-    //         targets.map { uri =>
-    //           val label = qo.pathToLabel(uriToPath(uri))
-    //           val (qt, _) = qo.sourceTargets(label)
-    //           val act = qo.scalacActionsMap(label)
-    //           val srcs = act.arguments.dropWhile(_ =!= "--Files").tail.takeWhile(x => !x.startsWith("--"))
-    //           SourcesItem(
-    //             BuildTargetIdentifier(uri),
-    //             srcs.map(x => root / Path(x)).map(pathToUri).map(SourceItem(_, SourceItemKind.File, false)).toList,
-    //             Nil
-    //           )
-    //         }
-    //       }.asJson
-    //     }
-    //   }
-    // }
 
-  def scalacOptions(targets: List[SafeUri]) = {
+  def scalacOptions(targets: List[SafeUri]) =
     workspaceRoot.flatMap { wsr =>
-      Tasks.scalacOptions(wsr).map { scos =>
+      readScalacOptions.map { scos =>
         val r = uriToPath(wsr)
         Some {
           ScalacOptionsResult {
-            scos.map { case (label, sco) =>
+            scos.toList.map { case (label, sco) =>
               ScalacOptionsItem(
                 BuildTargetIdentifier(pathToUri(Path(label))),
                 sco.scalacopts ++ List(
@@ -299,120 +259,46 @@ class BspServerOps(state: SignallingRef[IO, BspState])(implicit R: Raise[IO, Bsp
         }
       }
     }
-    // regen.flatMap { qo =>
-    //   workspaceRoot.map(uriToPath).map { root =>
-    //     Some {
-    //       ScalacOptionsResult {
-    //         targets.map { uri =>
-    //           val label = qo.pathToLabel(uriToPath(uri))
-    //           val (qt, sdb) = qo.sourceTargets(label)
-    //           val act = qo.scalacActionsMap(label)
-    //           val args = act.arguments.dropWhile(_ =!= "--ScalacOpts").tail.takeWhile(x => !x.startsWith("--")) ++ List(
-    //             s"-P:semanticdb:sourceroot:${sdb}"
-    //           )
-    //           // consider getting this from a query(deps) -> aquery(output jars)
-    //           val classpath = act.arguments.dropWhile(_ =!= "--Classpath").tail.takeWhile(x => !x.startsWith("--"))
-    //           ScalacOptionsItem(
-    //             BuildTargetIdentifier(uri),
-    //             (args.toList ++ List(
-    //               "-Xplugin-require:semanticdb",
-    //               "-Xplugin:/home/valde/.cache/bloop/semanticdb/org.scalameta.semanticdb-scalac_2.13.12.4.8.3/semanticdb-scalac_2.13.12-4.8.3.jar"
-    //             )).distinct,
-    //             classpath.toList.map(x => pathToUri(root / x)),
-    //             sdb
-    //           )
-    //         }
-    //       }.asJson
-    //     }
-    //   }
-    // }
-  }
 
-  def buildTargets: IO[Option[Json]] = {
-    workspaceRoot.flatMap(Tasks.buildTargets).map { bts =>
-      val targets = bts.map { case (label, bt) =>
-        BuildTarget(
-          id = BuildTargetIdentifier(pathToUri(Path(label))),
-          displayName = Some(label),
-          baseDirectory = Some(pathToUri(Path(bt.directory))),
-          tags = List("library"),
-          languageIds = List("scala"),
-          dependencies = bt.deps.map(x => BuildTargetIdentifier(pathToUri(Path(x)))),
-          capabilities = BuildTargetCapabilities(
-            canCompile = Some(true),
-            canTest = Some(false),
-            canRun = Some(false),
-            canDebug = Some(false)
-          ),
-          dataKind = Some("scala"),
-          data = Some {
-            ScalaBuildTarget(
-              scalaOrganization = "org.scala-lang",
-              scalaVersion = "2.13.12",
-              scalaBinaryVersion = "2.13",
-              platform = 1,
-              jars = bt.scalaCompilerClasspath.map(Path(_)).map(pathToUri),
-              jvmBuildTarget = Some {
-                JvmBuildTarget(
-                  javaHome = Some(SafeUri("file:///nix/store/7c2ksq340xg06jmym46fzd0rbxphlzm3-openjdk-19.0.2+7/lib/openjdk/")),
-                  javaVersion = None
-                )
-              }
-            )
-          }
-        )
+  def buildTargets: IO[Option[Json]] =
+    workspaceRoot
+      .flatMap(BuildTargetCache.build)
+      .flatMap(btc => state.update(_.copy(buildTargetCache = Some(btc)))) >>
+      readBuildTargets.map { bts =>
+        val targets = bts.toList.map { case (label, bt) =>
+          BuildTarget(
+            id = BuildTargetIdentifier(pathToUri(Path(label))),
+            displayName = Some(label),
+            baseDirectory = Some(pathToUri(Path(bt.directory))),
+            tags = List("library"),
+            languageIds = List("scala"),
+            dependencies = bt.deps.map(x => BuildTargetIdentifier(pathToUri(Path(x)))),
+            capabilities = BuildTargetCapabilities(
+              canCompile = Some(true),
+              canTest = Some(false),
+              canRun = Some(false),
+              canDebug = Some(false)
+            ),
+            dataKind = Some("scala"),
+            data = Some {
+              ScalaBuildTarget(
+                scalaOrganization = "org.scala-lang",
+                scalaVersion = "2.13.12",
+                scalaBinaryVersion = "2.13",
+                platform = 1,
+                jars = bt.scalaCompilerClasspath.map(Path(_)).map(pathToUri),
+                jvmBuildTarget = Some {
+                  JvmBuildTarget(
+                    javaHome = Some(SafeUri("file:///nix/store/7c2ksq340xg06jmym46fzd0rbxphlzm3-openjdk-19.0.2+7/lib/openjdk/")),
+                    javaVersion = None
+                  )
+                }
+              )
+            }
+          )
+        }
+        Some {
+          WorkspaceBuildTargetsResult(targets = targets).asJson
+        }
       }
-      Some {
-        WorkspaceBuildTargetsResult(targets = targets).asJson
-      }
-
-      // regen.map { qo =>
-      //   println(s"missing from query: ${qo.missingFromQuery}\nmissing from aquery: ${qo.missingFromAquery}")
-      //   println(s"missing semanticsdb: ${qo.missingSemanticsDb}")
-
-      //   val targets = qo.sourceTargets.toList.map { case (k, (qt, _)) =>
-      //     val scalaDeps: Seq[SafeUri] =
-      //       qt.deps.mapFilter(qo.scalaQueryTargets.get).map(x => pathToUri(x.path))
-      //     BuildTarget(
-      //       id = BuildTargetIdentifier(pathToUri(qt.path)),
-      //       displayName = Some(qt.path.fileName.toString),
-      //       baseDirectory = Some(pathToUri(qt.path)),
-      //       tags = List("library"),
-      //       languageIds = List("scala"),
-      //       dependencies = scalaDeps.map(BuildTargetIdentifier(_)).toList,
-      //       capabilities = BuildTargetCapabilities(
-      //         canCompile = Some(true),
-      //         canTest = Some(false),
-      //         canRun = Some(false),
-      //         canDebug = Some(false)
-      //       ),
-      //       dataKind = Some("scala"),
-      //       data = Some {
-      //         ScalaBuildTarget(
-      //           scalaOrganization = "org.scala-lang",
-      //           scalaVersion = "2.13.12",
-      //           scalaBinaryVersion = "2.13",
-      //           platform = 1,
-      //           jars = List(
-      //             "file:///home/valde/git/mezel-example/bazel-out/k8-fastbuild/bin/external/io_bazel_rules_scala_scala_library/io_bazel_rules_scala_scala_library.stamp/scala-library-2.13.12.jar",
-      //             "file:///home/valde/git/mezel-example/bazel-out/k8-fastbuild/bin/external/io_bazel_rules_scala_scala_reflect/io_bazel_rules_scala_scala_reflect.stamp/scala-reflect-2.13.12.jar",
-      //             "file:///home/valde/git/mezel-example/bazel-out/k8-fastbuild/bin/external/io_bazel_rules_scala_scala_compiler/io_bazel_rules_scala_scala_compiler.stamp/scala-compiler-2.13.12.jar"
-      //           ).map(SafeUri(_)),
-      //           jvmBuildTarget = Some {
-      //             JvmBuildTarget(
-      //               javaHome = Some(SafeUri("file:///nix/store/7c2ksq340xg06jmym46fzd0rbxphlzm3-openjdk-19.0.2+7/lib/openjdk/")),
-      //               javaVersion = None
-      //             )
-      //           }
-      //         )
-      //       }
-      //     )
-      //   }
-
-      //   Some {
-      //     WorkspaceBuildTargetsResult(targets = targets).asJson
-      //   }
-      // }
-    }
-  }
 }
