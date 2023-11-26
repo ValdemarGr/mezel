@@ -23,6 +23,7 @@ import java.nio.file.Paths
 import java.net.URI
 import com.google.devtools.build.lib.analysis.analysis_v2.PathFragment
 import fs2.concurrent.Channel
+import _root_.io.bazel.rules_scala.diagnostics.diagnostics
 
 enum BspResponseError(val code: Int, val message: String, val data: Option[Json] = None):
   case NotInitialized extends BspResponseError(-32002, "Server not initialized")
@@ -31,10 +32,6 @@ enum BspResponseError(val code: Int, val message: String, val data: Option[Json]
 
 final case class BuildTargetCache(
     buildTargets: List[(String, Tasks.BuildTargetFiles)]
-    // memoBuildTargets: IO[List[(String, AspectTypes.BuildTarget)]],
-    // memoScalacOptions: IO[List[(String, AspectTypes.ScalacOptions)]],
-    // memoSources: IO[List[(String, AspectTypes.Sources)]],
-    // memoDependencySources: IO[List[(String, AspectTypes.DependencySources)]]
 ) {
   def read[A: Decoder](f: Tasks.BuildTargetFiles => Path): Stream[IO, (String, A)] =
     Stream.emits(buildTargets).parEvalMapUnordered(16) { case (label, bt) =>
@@ -57,21 +54,6 @@ final case class BuildTargetCache(
 }
 
 object BuildTargetCache {
-  // def fromTargets(buildTargets: List[(String, Tasks.BuildTargetFiles)]): IO[BuildTargetCache] = {
-  //   def mk[A: Decoder](f: Tasks.BuildTargetFiles => Path) =
-  //     buildTargets.parTraverse { case (label, bt) =>
-  //       Files[IO].readAll(f(bt)).through(fs2.text.utf8.decode).compile.string.flatMap { str =>
-  //         IO.fromEither(_root_.io.circe.parser.decode[A](str)) tupleLeft label
-  //       }
-  //     }.memoize
-  //   (
-  //     mk[AspectTypes.BuildTarget](_.buildTarget),
-  //     mk[AspectTypes.ScalacOptions](_.scalacOptions),
-  //     mk[AspectTypes.Sources](_.sources),
-  //     mk[AspectTypes.DependencySources](_.dependencySources)
-  //   ).mapN(BuildTargetCache(buildTargets, _, _, _, _))
-  // }
-
   def build(root: SafeUri): IO[BuildTargetCache] =
     Tasks.buildTargetFiles(root).map(xs => xs.map(x => x.label -> x)).map(BuildTargetCache(_)) // .flatMap(fromTargets)
 }
@@ -108,6 +90,23 @@ object Tasks {
       buildTarget: Path
   )
 
+  final case class ActionQueryResultExtensions(
+      aq: analysis_v2.ActionGraphContainer
+  ) {
+    lazy val inputMap = aq.depSetOfFiles.map(x => x.id -> x.directArtifactIds).toMap
+    lazy val targetMap = aq.targets.map(x => x.id -> x.label).toMap
+    lazy val pathFrags = aq.pathFragments.map(p => p.id -> p).toMap
+    lazy val arts = aq.artifacts.map(x => x.id -> x.pathFragmentId).toMap
+
+    def buildPath(x: analysis_v2.PathFragment): Path = {
+      def go(x: analysis_v2.PathFragment): Eval[Path] = Eval.defer {
+        pathFrags.get(x.parentId).traverse(go(_)).map(_.map(_ / x.label).getOrElse(Path(x.label)))
+      }
+
+      go(x).value
+    }
+  }
+
   def buildTargetFiles(uri: SafeUri): IO[List[BuildTargetFiles]] = {
     val api = BazelAPI(uriToPath(uri))
 
@@ -117,34 +116,55 @@ object Tasks {
       api
         .aquery(mnemonic("MezelAspect")(deps("//src/main/scala/casehub")), "--aspects //aspects:aspect.bzl%mezel_aspect")
         .map { x =>
-          val inputMap = x.depSetOfFiles.map(x => x.id -> x.directArtifactIds).toMap
-          val targetMap = x.targets.map(x => x.id -> x.label).toMap
-          val pathFrags = x.pathFragments.map(p => p.id -> p).toMap
-          val arts = x.artifacts.map(x => x.id -> x.pathFragmentId).toMap
-          def buildPath(x: analysis_v2.PathFragment): Path = {
-            def go(x: analysis_v2.PathFragment): Eval[Path] = Eval.defer {
-              pathFrags.get(x.parentId).traverse(go(_)).map(_.map(_ / x.label).getOrElse(Path(x.label)))
-            }
-
-            go(x).value
-          }
+          val ext = ActionQueryResultExtensions(x)
           x.actions.toList.map { act =>
-            val artifacts = act.inputDepSetIds.flatMap(id => inputMap.get(id).getOrElse(Nil))
-            val pfs = artifacts.map(arts).map(pathFrags)
+            val artifacts = act.inputDepSetIds.flatMap(id => ext.inputMap.get(id).getOrElse(Nil))
+            val pfs = artifacts.map(ext.arts).map(ext.pathFrags)
             val so = pfs.find(_.label.endsWith("scalac_options.json")).get
             val s = pfs.find(_.label.endsWith("bsp_sources.json")).get
             val ds = pfs.find(_.label.endsWith("bsp_dependency_sources.json")).get
             val bt = pfs.find(_.label.endsWith("build_target.json")).get
             val root = uriToPath(uri)
             BuildTargetFiles(
-              targetMap(act.targetId),
-              root / buildPath(so),
-              root / buildPath(s),
-              root / buildPath(ds),
-              root / buildPath(bt)
+              ext.targetMap(act.targetId),
+              root / ext.buildPath(so),
+              root / ext.buildPath(s),
+              root / ext.buildPath(ds),
+              root / ext.buildPath(bt)
             )
           }
         }
+  }
+
+  def diagnosticsProtos(uri: SafeUri): IO[Seq[(String, diagnostics.TargetDiagnostics)]] = {
+    val api = BazelAPI(uriToPath(uri))
+
+    import dsl._
+
+    api.aquery(mnemonic("Scalac")("...")).flatMap { aq =>
+      val ext = ActionQueryResultExtensions(aq)
+      val outputs = aq.actions.mapFilter { a =>
+        val label = ext.targetMap(a.targetId)
+        val outputs = a.primaryOutputId :: a.outputIds.toList
+        val res = outputs.collectFirstSome { id =>
+          val p = ext.pathFrags(ext.arts(id))
+          if (p.label.endsWith(".diagnosticsproto")) Some(ext.buildPath(p))
+          else None
+        }
+        res tupleLeft label
+      }
+
+      val r = uriToPath(uri)
+      outputs.traverse { case (label, p) =>
+        val fp = r / p
+        Files[IO]
+          .readAll(fp)
+          .through(fs2.io.toInputStream[IO])
+          .evalMap(is => IO.blocking(diagnostics.TargetDiagnostics.parseFrom(is)))
+          .compile
+          .lastOrError tupleLeft label
+      }
+    }
   }
 }
 
@@ -152,9 +172,64 @@ object BspState {
   val empty: BspState = BspState(None, None)
 }
 
+def convertDiagnostic(target: BuildTargetIdentifier, tds: diagnostics.TargetDiagnostics): List[PublishDiagnosticsParams] = {
+  tds.diagnostics.groupBy(_.path).toList.map { case (p, fds) =>
+    val ds = fds.flatMap(_.diagnostics).toList.map { d =>
+      val rng = d.range.get
+      val start = rng.start.get
+      val e = rng.end.get
+      Diagnostic(
+        range = Range(
+          Position(start.line, start.character),
+          Position(e.line, e.character)
+        ),
+        severity = d.severity match {
+          case diagnostics.Severity.ERROR       => Some(DiagnosticSeverity.Error)
+          case diagnostics.Severity.WARNING     => Some(DiagnosticSeverity.Warning)
+          case diagnostics.Severity.INFORMATION => Some(DiagnosticSeverity.Information)
+          case diagnostics.Severity.HINT        => Some(DiagnosticSeverity.Hint)
+          case _                                => None
+        },
+        code = Some(Code(d.code.toInt)),
+        codeDestription = None,
+        source = None,
+        message = d.message,
+        tags = None,
+        relatedInformation = Some {
+          d.relatedInformation.toList.map { ri =>
+            val rng = ri.location.get.range.get
+            val start = rng.start.get
+            val e = rng.end.get
+            DiagnosticRelatedInformation(
+              location = Location(
+                uri = SafeUri(ri.location.get.path),
+                range = Range(
+                  Position(start.line, start.character),
+                  Position(e.line, e.character)
+                )
+              ),
+              message = ri.message
+            )
+          }
+        },
+        None,
+        None
+      )
+    }
+
+    PublishDiagnosticsParams(
+      textDocument = TextDocumentIdentifier(SafeUri(p)),
+      buildTarget = target,
+      originId = None,
+      diagnostics = ds,
+      reset = true
+    )
+  }
+}
+
 class BspServerOps(
-  state: SignallingRef[IO, BspState],
-  outChan: Channel[IO, Json]
+    state: SignallingRef[IO, BspState],
+    outChan: Channel[IO, Json]
 )(implicit R: Raise[IO, BspResponseError]) {
   import _root_.io.circe.syntax.*
 
@@ -169,6 +244,8 @@ class BspServerOps(
 
     fa.compile.toList
   }
+
+  def readId = readBuildTargetCache(x => Stream.emits(x.buildTargets))
 
   def readBuildTargets = readBuildTargetCache(_.readBuildTargets)
 
@@ -230,7 +307,8 @@ class BspServerOps(
     }
 
   def compile(targets: List[SafeUri]): IO[Option[Json]] =
-    workspaceRoot.map(d => BazelAPI(uriToPath(d))).flatMap { api =>
+    workspaceRoot.flatMap { wsr =>
+      val api = BazelAPI(uriToPath(wsr))
       api.runBuild("...").void.as {
         Some {
           CompileResult(
@@ -239,6 +317,15 @@ class BspServerOps(
             None,
             None
           ).asJson
+        }
+      } <* readId.flatMap { xs =>
+        Tasks.diagnosticsProtos(wsr).flatMap { ys =>
+          val labels = xs.map { case (id, _) => id }.toSet
+          val interesting = ys.filter { case (label, _) => labels.contains(label) }
+          interesting.traverse_ { case (l, td) =>
+            val ds = convertDiagnostic(BuildTargetIdentifier(pathToUri(Path(l))), td)
+            ds.traverse_(pd => outChan.send(pd.asJson).void)
+          }
         }
       }
     }

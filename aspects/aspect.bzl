@@ -9,12 +9,12 @@ BuildTargetInfo = provider(
 )
 
 def _mezel_aspect(target, ctx):
+  if ctx.rule.kind != "scala_library":
+    return []
+
   attrs = ctx.rule.attr
 
   jdk = ctx.attr._jdk
-
-  if ctx.rule.kind != "scala_library":
-    return []
 
   tc = ctx.toolchains["@io_bazel_rules_scala//scala:toolchain_type"]
 
