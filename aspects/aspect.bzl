@@ -119,17 +119,6 @@ def _mezel_aspect(target, ctx):
     BuildTargetInfo(output = files)
   ]
 
-def _mezel_config(ctx):
-  all_outputs = depset(
-    [], 
-    transitive = [x[OutputGroupInfo].bsp_info for x in ctx.attr.deps if OutputGroupInfo in x and hasattr(x[OutputGroupInfo], "bsp_info")]
-  )
-  ctx.actions.do_nothing(
-    mnemonic = "MezelConfig",
-    inputs = all_outputs
-  )
-  return DefaultInfo(files = all_outputs)
-
 mezel_aspect = aspect(
   implementation = _mezel_aspect,
   attr_aspects = ["deps"],
@@ -145,16 +134,27 @@ mezel_aspect = aspect(
   ],
 )
 
-mezel_config = rule(
-  implementation = _mezel_config,
-  attrs = {
-    "deps": attr.label_list(
-      mandatory=True,
-      aspects = [mezel_aspect],
-      providers = [JavaInfo, SemanticdbInfo]
-    )
-  },
-  toolchains = [
-    "@io_bazel_rules_scala//scala:toolchain_type",
-  ],
-)
+# def _mezel_config(ctx):
+#   all_outputs = depset(
+#     [], 
+#     transitive = [x[OutputGroupInfo].bsp_info for x in ctx.attr.deps if OutputGroupInfo in x and hasattr(x[OutputGroupInfo], "bsp_info")]
+#   )
+#   ctx.actions.do_nothing(
+#     mnemonic = "MezelConfig",
+#     inputs = all_outputs
+#   )
+#   return DefaultInfo(files = all_outputs)
+
+# mezel_config = rule(
+#   implementation = _mezel_config,
+#   attrs = {
+#     "deps": attr.label_list(
+#       mandatory=True,
+#       aspects = [mezel_aspect],
+#       providers = [JavaInfo, SemanticdbInfo]
+#     )
+#   },
+#   toolchains = [
+#     "@io_bazel_rules_scala//scala:toolchain_type",
+#   ],
+# )
