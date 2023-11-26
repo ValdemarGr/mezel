@@ -42,7 +42,10 @@ write_bsp_build_config = rule(
     ),
     "binary": attr.label(
         # default = Label("@bazel_tools//tools/jdk:current_java_runtime"),
-        default = Label("@mezel_binary//:mezel_binary")
+        default = Label("@mezel_binary//:mezel_binary"),
+        executable = True,
+        allow_files = True,
+        cfg = "exec"
     ),
   },
 )
