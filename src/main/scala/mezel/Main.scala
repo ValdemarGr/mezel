@@ -79,14 +79,14 @@ object Main extends IOApp.Simple {
               .unNone
               .map(_.asJson)
 
-            ioStream
-              .merge(chan.stream)
-              .map(_.spaces2)
-              .map(data => s"Content-Length: ${data.length}\r\n\r\n$data")
-              .through(fs2.text.utf8.encode)
-              .through(Files[IO].writeAll(Path("/tmp/to-metals")))
-              .compile
-              .drain
+          ioStream
+            .merge(chan.stream)
+            .map(_.spaces2)
+            .map(data => s"Content-Length: ${data.length}\r\n\r\n$data")
+            .through(fs2.text.utf8.encode)
+            .through(Files[IO].writeAll(Path("/tmp/to-metals")))
+            .compile
+            .drain
         }
       }
     }
