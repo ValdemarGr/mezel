@@ -29,31 +29,50 @@ enum BspResponseError(val code: Int, val message: String, val data: Option[Json]
   def responseError: ResponseError = ResponseError(code, message, data)
 
 final case class BuildTargetCache(
-    buildTargets: List[(String, Tasks.BuildTargetFiles)],
-    memoBuildTargets: IO[List[(String, AspectTypes.BuildTarget)]],
-    memoScalacOptions: IO[List[(String, AspectTypes.ScalacOptions)]],
-    memoSources: IO[List[(String, AspectTypes.Sources)]],
-    memoDependencySources: IO[List[(String, AspectTypes.DependencySources)]]
-)
+    buildTargets: List[(String, Tasks.BuildTargetFiles)]
+    // memoBuildTargets: IO[List[(String, AspectTypes.BuildTarget)]],
+    // memoScalacOptions: IO[List[(String, AspectTypes.ScalacOptions)]],
+    // memoSources: IO[List[(String, AspectTypes.Sources)]],
+    // memoDependencySources: IO[List[(String, AspectTypes.DependencySources)]]
+) {
+  def read[A: Decoder](f: Tasks.BuildTargetFiles => Path): Stream[IO, (String, A)] =
+    Stream.emits(buildTargets).parEvalMapUnordered(16) { case (label, bt) =>
+      Files[IO].readAll(f(bt)).through(fs2.text.utf8.decode).compile.string.flatMap { str =>
+        IO.fromEither(_root_.io.circe.parser.decode[A](str)) tupleLeft label
+      }
+    }
+
+  val readBuildTargets =
+    read[AspectTypes.BuildTarget](_.buildTarget)
+
+  val readScalacOptions =
+    read[AspectTypes.ScalacOptions](_.scalacOptions)
+
+  val readSources =
+    read[AspectTypes.Sources](_.sources)
+
+  val readDependencySources =
+    read[AspectTypes.DependencySources](_.dependencySources)
+}
 
 object BuildTargetCache {
-  def fromTargets(buildTargets: List[(String, Tasks.BuildTargetFiles)]): IO[BuildTargetCache] = {
-    def mk[A: Decoder](f: Tasks.BuildTargetFiles => Path) =
-      buildTargets.parTraverse { case (label, bt) =>
-        Files[IO].readAll(f(bt)).through(fs2.text.utf8.decode).compile.string.flatMap { str =>
-          IO.fromEither(_root_.io.circe.parser.decode[A](str)) tupleLeft label
-        }
-      }.memoize
-    (
-      mk[AspectTypes.BuildTarget](_.buildTarget),
-      mk[AspectTypes.ScalacOptions](_.scalacOptions),
-      mk[AspectTypes.Sources](_.sources),
-      mk[AspectTypes.DependencySources](_.dependencySources)
-    ).mapN(BuildTargetCache(buildTargets, _, _, _, _))
-  }
+  // def fromTargets(buildTargets: List[(String, Tasks.BuildTargetFiles)]): IO[BuildTargetCache] = {
+  //   def mk[A: Decoder](f: Tasks.BuildTargetFiles => Path) =
+  //     buildTargets.parTraverse { case (label, bt) =>
+  //       Files[IO].readAll(f(bt)).through(fs2.text.utf8.decode).compile.string.flatMap { str =>
+  //         IO.fromEither(_root_.io.circe.parser.decode[A](str)) tupleLeft label
+  //       }
+  //     }.memoize
+  //   (
+  //     mk[AspectTypes.BuildTarget](_.buildTarget),
+  //     mk[AspectTypes.ScalacOptions](_.scalacOptions),
+  //     mk[AspectTypes.Sources](_.sources),
+  //     mk[AspectTypes.DependencySources](_.dependencySources)
+  //   ).mapN(BuildTargetCache(buildTargets, _, _, _, _))
+  // }
 
   def build(root: SafeUri): IO[BuildTargetCache] =
-    Tasks.buildTargetFiles(root).map(xs => xs.map(x => x.label -> x)).flatMap(fromTargets)
+    Tasks.buildTargetFiles(root).map(xs => xs.map(x => x.label -> x)).map(BuildTargetCache(_)) // .flatMap(fromTargets)
 }
 
 final case class BspState(
@@ -135,22 +154,25 @@ object BspState {
 class BspServerOps(state: SignallingRef[IO, BspState])(implicit R: Raise[IO, BspResponseError]) {
   import _root_.io.circe.syntax.*
 
-  def readBuildTargetCache[A](f: BuildTargetCache => IO[List[(String, A)]]): IO[List[(String, A)]] =
-    state.get.flatMap { s =>
-      R.fromOption(BspResponseError.NotInitialized)(s.buildTargetCache).flatMap(f)
-    }
+  // for now we just compile
+  // TODO, we can stream the results out into json
+  def readBuildTargetCache[A](f: BuildTargetCache => Stream[IO, (String, A)]): IO[List[(String, A)]] = {
+    val fa = for {
+      curr <- Stream.eval(state.get)
+      btc <- Stream.eval(R.fromOption(BspResponseError.NotInitialized)(curr.buildTargetCache))
+      res <- f(btc)
+    } yield res
 
-  def readBuildTargets: IO[List[(String, AspectTypes.BuildTarget)]] =
-    readBuildTargetCache(_.memoBuildTargets)
+    fa.compile.toList
+  }
 
-  def readScalacOptions: IO[List[(String, AspectTypes.ScalacOptions)]] =
-    readBuildTargetCache(_.memoScalacOptions)
+  def readBuildTargets = readBuildTargetCache(_.readBuildTargets)
 
-  def readSources: IO[List[(String, AspectTypes.Sources)]] =
-    readBuildTargetCache(_.memoSources)
+  def readScalacOptions = readBuildTargetCache(_.readScalacOptions)
 
-  def readDependencySources: IO[List[(String, AspectTypes.DependencySources)]] =
-    readBuildTargetCache(_.memoDependencySources)
+  def readSources = readBuildTargetCache(_.readSources)
+
+  def readDependencySources = readBuildTargetCache(_.readDependencySources)
 
   def get[A](f: BspState => Option[A])(err: BspState => BspResponseError): IO[A] =
     state.get.flatMap(s => R.fromOption(err(s))(f(s)))
