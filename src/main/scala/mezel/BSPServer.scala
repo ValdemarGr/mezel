@@ -24,6 +24,7 @@ import java.net.URI
 import com.google.devtools.build.lib.analysis.analysis_v2.PathFragment
 import fs2.concurrent.Channel
 import _root_.io.bazel.rules_scala.diagnostics.diagnostics
+import cats.effect.std.Supervisor
 
 enum BspResponseError(val code: Int, val message: String, val data: Option[Json] = None):
   case NotInitialized extends BspResponseError(-32002, "Server not initialized")
@@ -53,9 +54,6 @@ final case class BuildTargetCache(
     read[AspectTypes.DependencySources](_.dependencySources)
 }
 
-// final case class BuildQueryCache(
-// )
-
 object BuildTargetCache {
   def build(root: SafeUri): IO[BuildTargetCache] =
     Tasks.buildTargetFiles(root).map(xs => xs.map(x => x.label -> x)).map(BuildTargetCache(_)) // .flatMap(fromTargets)
@@ -71,8 +69,6 @@ def pathToUri(p: Path): SafeUri = SafeUri(s"file://${p.absolute.toString}")
 def uriToPath(suri: SafeUri): Path = Path.fromNioPath(Paths.get(new URI(suri.value)))
 
 object Tasks {
-  // def allScalaPaths(uri: SafeUri, targets: String*)
-
   def buildConfig(uri: SafeUri, targets: String*): IO[Unit] = {
     val api = BazelAPI(uriToPath(uri))
 
@@ -240,7 +236,9 @@ def convertDiagnostic(
 
 class BspServerOps(
     state: SignallingRef[IO, BspState],
-    outChan: Channel[IO, (String, Json)]
+    requestDone: Deferred[IO, Unit],
+    sup: Supervisor[IO],
+    output: Channel[IO, Json]
 )(implicit R: Raise[IO, BspResponseError]) {
   import _root_.io.circe.syntax.*
 
@@ -271,6 +269,9 @@ class BspServerOps(
 
   def workspaceRoot: IO[SafeUri] =
     get(_.workspaceRoot)(_ => BspResponseError.NotInitialized)
+
+  def sendNotification[A: Encoder](method: String, params: A): IO[Unit] =
+    output.send(Notification("2.0", method, Some(params.asJson)).asJson).void
 
   def initalize(msg: InitializeBuildParams): IO[Option[Json]] =
     state
@@ -330,12 +331,16 @@ class BspServerOps(
           ).asJson
         }
       } <* readId.flatMap { xs =>
-        Tasks.diagnosticsProtos(wsr).flatMap { ys =>
-          val labels = xs.map { case (id, _) => id }.toSet
-          val interesting = ys.filter { case (label, _) => labels.contains(label) }
-          interesting.traverse_ { case (l, td) =>
-            val ds = convertDiagnostic(wsr, BuildTargetIdentifier(pathToUri(Path(l))), td)
-            ds.traverse_(pd => outChan.send("build/publishDiagnostics" -> pd.asJson).void)
+        sup.supervise {
+          Tasks.diagnosticsProtos(wsr).flatMap { ys =>
+            val labels = xs.map { case (id, _) => id }.toSet
+            val interesting = ys.filter { case (label, _) => labels.contains(label) }
+            requestDone.get *> {
+              interesting.traverse_ { case (l, td) =>
+                val ds = convertDiagnostic(wsr, BuildTargetIdentifier(pathToUri(Path(l))), td)
+                ds.traverse_(x => sendNotification("build/publishDiagnostics", x.asJson))
+              }
+            }
           }
         }
       }
