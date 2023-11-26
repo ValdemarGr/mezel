@@ -53,6 +53,9 @@ final case class BuildTargetCache(
     read[AspectTypes.DependencySources](_.dependencySources)
 }
 
+// final case class BuildQueryCache(
+// )
+
 object BuildTargetCache {
   def build(root: SafeUri): IO[BuildTargetCache] =
     Tasks.buildTargetFiles(root).map(xs => xs.map(x => x.label -> x)).map(BuildTargetCache(_)) // .flatMap(fromTargets)
@@ -68,6 +71,8 @@ def pathToUri(p: Path): SafeUri = SafeUri(s"file://${p.absolute.toString}")
 def uriToPath(suri: SafeUri): Path = Path.fromNioPath(Paths.get(new URI(suri.value)))
 
 object Tasks {
+  // def allScalaPaths(uri: SafeUri, targets: String*)
+
   def buildConfig(uri: SafeUri, targets: String*): IO[Unit] = {
     val api = BazelAPI(uriToPath(uri))
 
@@ -223,8 +228,6 @@ def convertDiagnostic(
 
     val r = uriToPath(root)
     val fixedTextDocumentRef = p.replace("workspace-root://", "")
-    println(p)
-    println(fixedTextDocumentRef)
     PublishDiagnosticsParams(
       textDocument = TextDocumentIdentifier(pathToUri(r / Path(fixedTextDocumentRef))),
       buildTarget = target,
@@ -332,7 +335,6 @@ class BspServerOps(
           val interesting = ys.filter { case (label, _) => labels.contains(label) }
           interesting.traverse_ { case (l, td) =>
             val ds = convertDiagnostic(wsr, BuildTargetIdentifier(pathToUri(Path(l))), td)
-            println(s"publishing diagnostics for ${l} ${ds}")
             ds.traverse_(pd => outChan.send("build/publishDiagnostics" -> pd.asJson).void)
           }
         }
