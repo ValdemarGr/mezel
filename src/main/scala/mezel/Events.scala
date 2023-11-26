@@ -2,8 +2,23 @@ package mezel
 
 import io.circe._
 
-final case class PublishDiagnostics(
-)
+final case class LogMessageParams(
+    `type`: MessageType,
+    task: TaskId,
+    originId: Option[String],
+    message: String
+) derives Encoder.AsObject
+
+enum MessageType:
+  case Error, Warning, Info, Log
+
+object MessageType:
+  given Encoder[MessageType] = Encoder[Int].contramap {
+    case MessageType.Error   => 1
+    case MessageType.Warning => 2
+    case MessageType.Info    => 3
+    case MessageType.Log     => 4
+  }
 
 final case class TextDocumentIdentifier(
     uri: SafeUri
