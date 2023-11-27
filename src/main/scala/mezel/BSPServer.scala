@@ -244,7 +244,8 @@ class BspServerOps(
     state: SignallingRef[IO, BspState],
     requestDone: Deferred[IO, Unit],
     sup: Supervisor[IO],
-    output: Channel[IO, Json]
+    output: Channel[IO, Json],
+    cache: Path
 )(implicit R: Raise[IO, BspResponseError]) {
   import _root_.io.circe.syntax.*
 
@@ -281,6 +282,8 @@ class BspServerOps(
 
   def sendNotification[A: Encoder](method: String, params: A): IO[Unit] =
     output.send(Notification("2.0", method, Some(params.asJson)).asJson).void
+
+  def cachedSemanticdbPath(targetroot: String) = cache / targetroot
 
   def tasks = workspaceRoot.map { wsr =>
     Tasks(
@@ -336,7 +339,36 @@ class BspServerOps(
       }
     }
 
-  def compile(targets: List[SafeUri]): IO[Option[Json]] =
+  def compile(targets: List[SafeUri]): IO[Option[Json]] = {
+    // val cacheSemanticdb = readScalacOptions.flatMap { xs =>
+    //   xs.traverse_ { case (label, opt) =>
+    //     val folder = uriToPath(wsr) / Path(opt.targetroot)
+    //     println(folder)
+    //     Files[IO].exists(folder).flatMap {
+    //       case false => IO.unit
+    //       case true =>
+    //         println("true")
+    //         Files[IO].walk(folder, 128, followLinks = false).evalFilterNot(Files[IO].isDirectory(_)).compile.toList.flatMap {
+    //           // Files[IO].list(folder, "**/*.semanticdb").compile.count.flatMap {
+    //           // Don't do anything if there are no semanticdb files
+    //           case Nil => IO.unit
+    //           // Move to cache if there are semanticdb files
+    //           case n =>
+    //             println("many")
+    //             // println(s"$folder -> ")
+    //             Files[IO]
+    //               .copy(
+    //                 folder,
+    //                 cache
+    //                 // cachedSemanticdbPath(opt.targetroot),
+    //                 // CopyFlags(CopyFlag.AtomicMove, CopyFlag.ReplaceExisting)
+    //               )
+    //               .void
+    //         }
+    //     }
+    //   }
+    // }
+
     workspaceRoot.flatMap { wsr =>
       tasks.flatMap { t =>
         t.buildAll.void.as {
@@ -375,6 +407,7 @@ class BspServerOps(
         }
       }
     }
+  }
 
   def sources(targets: List[SafeUri]): IO[Option[Json]] =
     workspaceRoot.flatMap { wsr =>
@@ -406,12 +439,12 @@ class BspServerOps(
               ScalacOptionsItem(
                 BuildTargetIdentifier(pathToUri(Path(label))),
                 sco.scalacopts ++ List(
-                  s"-P:semanticdb:targetroot:${sco.targetroot}",
+                  s"-P:semanticdb:targetroot:${(execRoot / sco.targetroot).toString/*cachedSemanticdbPath(sco.targetroot)*/}",
                   "-Xplugin-require:semanticdb",
-                  s"-Xplugin:${r / execRoot / Path(sco.semanticdbPlugin)}"
+                  s"-Xplugin:${execRoot / Path(sco.semanticdbPlugin)}"
                 ) ++ sco.plugins.map(x => s"-Xplugin:${r / Path(x)}"),
                 sco.classpath.map(x => pathToUri(r / Path(x))),
-                sco.semanticdbPlugin
+                (execRoot / sco.targetroot).toString //cachedSemanticdbPath(sco.targetroot).absolute.toString()
               )
             }
           }.asJson

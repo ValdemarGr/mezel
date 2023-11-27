@@ -10,7 +10,7 @@ BuildTargetInfo = provider(
 
 rule_kinds = [
   "scala_library",
-  "scala_binary",
+  # "scala_binary",
   "scala_test",
   "scala_junit_test"
 ]
@@ -63,11 +63,22 @@ def _mezel_aspect(target, ctx):
   cp_jars = [x.path for x in transitive_compile_jars if x.owner not in ignore]
   transitive_source_jars = target[JavaInfo].transitive_source_jars.to_list()
   src_jars = [x.path for x in transitive_source_jars if x.owner not in ignore]
-  # print(dep_labels)
-  # print([x.owner for x in transitive_compile_jars])
 
   raw_plugins = attrs.plugins if attrs.plugins else []
   plugins = [y.path for x in raw_plugins if JavaInfo in x for y in x[JavaInfo].compile_jars.to_list()]
+
+  # semanticdb_cache = ctx.actions.declare_directory("{}_semanticdb_cache".format(target.label.name))
+  # ctx.actions.run_shell(
+  #   inputs = target.files.to_list(),
+  #   outputs = [semanticdb_cache],
+  #   command = """ls -lAh {}/.. && if [ -z "$(ls -A {}/**/*.semanticdb)" ]; then true; else cp -r {} {}; fi""".format(
+  #     target.files.to_list()[0].root.path,
+  #     semanticdb_target_root, 
+  #     semanticdb_target_root, 
+  #     semanticdb_cache.path
+  #   ),
+  #   mnemonic = "CopySemanticdbCache"
+  # )
 
   scalac_options_file = ctx.actions.declare_file("{}_bsp_scalac_options.json".format(target.label.name))
   scalac_options_content = struct(
@@ -122,6 +133,13 @@ def _mezel_aspect(target, ctx):
         [scalac_options_file, sources_file, dependency_sources_file, build_target_file],
         transitive = transitive_output_files
       ),
+      # bsp_semanticdb_cache = depset(
+      #   [semanticdb_cache],
+      #   transitive = [
+      #     x[OutputGroupInfo].bsp_semanticdb_cache
+      #     for x in attrs.deps if OutputGroupInfo in x and hasattr(x[OutputGroupInfo], "bsp_semanticdb_cache")
+      #   ]
+      # ),
       bsp_info_deps = depset(
         scala_compile_classpath,
         transitive = [
