@@ -8,8 +8,15 @@ BuildTargetInfo = provider(
   }
 )
 
+rule_kinds = [
+  "scala_library",
+  "scala_binary",
+  "scala_test",
+  "scala_junit_test"
+]
+
 def _mezel_aspect(target, ctx):
-  if ctx.rule.kind != "scala_library":
+  if not ctx.rule.kind in rule_kinds:
     return []
 
   attrs = ctx.rule.attr
@@ -47,11 +54,17 @@ def _mezel_aspect(target, ctx):
     x[BuildTargetInfo].output
     for x in attrs.deps if BuildTargetInfo in x 
   ]
+  direct_dep_labels = [x.label for x in dep_outputs]
+
+  transitive_labels = depset([target.label], transitive = [x.transitive_labels for x in dep_outputs])
+  ignore = transitive_labels.to_list()
 
   transitive_compile_jars = target[JavaInfo].transitive_compile_time_jars.to_list()
-  cp_jars = [x.path for x in transitive_compile_jars]
+  cp_jars = [x.path for x in transitive_compile_jars if x.owner not in ignore]
   transitive_source_jars = target[JavaInfo].transitive_source_jars.to_list()
-  src_jars = [x.path for x in transitive_source_jars]
+  src_jars = [x.path for x in transitive_source_jars if x.owner not in ignore]
+  # print(dep_labels)
+  # print([x.owner for x in transitive_compile_jars])
 
   raw_plugins = attrs.plugins if attrs.plugins else []
   plugins = [y.path for x in raw_plugins if JavaInfo in x for y in x[JavaInfo].compile_jars.to_list()]
@@ -83,7 +96,7 @@ def _mezel_aspect(target, ctx):
     javaHome = jdk[java_common.JavaRuntimeInfo].java_home,
     scalaCompilerClasspath= [x.path for x in scala_compile_classpath],
     compilerVersion= compiler_version,
-    deps = [str(x.label) for x in dep_outputs],
+    deps = [str(l) for l in direct_dep_labels],
     directory = target.label.package,
   )
   ctx.actions.write(build_target_file, json.encode(build_target_content))
@@ -94,7 +107,8 @@ def _mezel_aspect(target, ctx):
   )
 
   files = struct(
-    label = target.label
+    label = target.label,
+    transitive_labels = transitive_labels,
   )
 
   transitive_output_files = [

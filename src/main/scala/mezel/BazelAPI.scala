@@ -25,7 +25,7 @@ import scalapb._
 class BazelAPI(rootDir: Path) {
   def run(pb: ProcessBuilder): Resource[IO, Process[IO]] =
     // Resource.eval(IO.println(s"running bazel command: ${pb.command} ${pb.args.map(x => s"'$x'").mkString(" ")}")) >>
-      pb.spawn[IO]
+    pb.spawn[IO]
 
   def builder(cmd: String, printLogs: Boolean, args: String*) = {
     ProcessBuilder("bazel", cmd :: List("--noshow_loading_progress", "--noshow_progress").filter(_ => !printLogs) ++ args.toList)
@@ -47,13 +47,16 @@ class BazelAPI(rootDir: Path) {
   def aquery(q: AnyQuery, extra: String*): IO[analysis_v2.ActionGraphContainer] =
     runAndParse[analysis_v2.ActionGraphContainer]("aquery", (q.render :: "--output=proto" :: extra.toList)*)
 
-  def runBuild(cmds: String*): IO[Int] =
-    run(builder("build", printLogs = true, cmds*)).use(p =>
+  def runBuild(log: Pipe[IO, String, Unit])(cmds: String*): IO[Int] = {
+    def pipe: Pipe[IO, Byte, Unit] = _.through(fs2.text.utf8.decode).through(fs2.text.lines).through(log)
+
+    run(builder("build", printLogs = true, cmds*)).use { p =>
       Stream
         .eval(p.exitValue)
-        .concurrently(p.stdout.through(fs2.text.utf8.decode).evalMap(IO.print))
-        .concurrently(p.stderr.through(fs2.text.utf8.decode).evalMap(IO.print))
+        .concurrently(p.stdout.through(pipe))
+        .concurrently(p.stderr.through(pipe))
         .compile
         .lastOrError
-    )
+    }
+  }
 }

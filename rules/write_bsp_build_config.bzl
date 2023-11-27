@@ -41,7 +41,7 @@ echo '{}' > $CONFIG_PATH/.bsp/mezel.json""".format(json.encode(j))
       executable = exec,
       runfiles = ctx.runfiles(files = [
         jar_file,
-        exec,
+        exec
       ])
     )
   ]

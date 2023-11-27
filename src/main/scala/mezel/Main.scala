@@ -25,7 +25,7 @@ object Main extends IOApp {
   def run(args: List[String]): IO[ExitCode] = {
     if (args.contains("--filesystem")) {
       runWithIO(
-        Files[IO].readAll(Path("/tmp/from-metals")),
+        Files[IO].tail(Path("/tmp/from-metals")),
         Files[IO].writeAll(Path("/tmp/to-metals"))
       )
     } else {

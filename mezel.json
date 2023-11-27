@@ -3,5 +3,5 @@
   "version": "1.0.0",
   "bspVersion": "2.0.0",
   "languages": ["scala"],
-  "argv": ["/home/valde/git/mezel/target/graalvm-native-image/mezel"]
+  "argv": ["/home/valde/git/mezel/filesystem-io/target/graalvm-native-image/mezel-filesystem-io"]
 }

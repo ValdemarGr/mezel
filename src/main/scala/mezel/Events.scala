@@ -4,7 +4,7 @@ import io.circe._
 
 final case class LogMessageParams(
     `type`: MessageType,
-    task: TaskId,
+    task: Option[TaskId],
     originId: Option[String],
     message: String
 ) derives Encoder.AsObject
