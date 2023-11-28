@@ -53,7 +53,24 @@
       "inputs": {
         "bazel-repo": "bazel-repo",
         "flake-utils": "flake-utils",
-        "nixpkgs": "nixpkgs"
+        "nixpkgs": "nixpkgs",
+        "rules-scala": "rules-scala"
+      }
+    },
+    "rules-scala": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1701096828,
+        "narHash": "sha256-oDVxDqFATs6NoFDWZEQnJ/nq24pAvtnuDA3hdS8OKmc=",
+        "owner": "bazelbuild",
+        "repo": "rules_scala",
+        "rev": "f9381414068466b9c74ff7681d204e1eb19c7f80",
+        "type": "github"
+      },
+      "original": {
+        "owner": "bazelbuild",
+        "repo": "rules_scala",
+        "type": "github"
       }
     },
     "systems": {
