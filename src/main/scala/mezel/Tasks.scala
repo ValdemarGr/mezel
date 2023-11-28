@@ -33,7 +33,7 @@ class Tasks(
 ) {
   val aspect = "@mezel//aspects:aspect.bzl%mezel_aspect"
 
-  def api = BazelAPI(uriToPath(root))
+  def api = BazelAPI(uriToPath(root), log)
 
   def buildTargetCache: IO[BuildTargetCache] =
     buildTargetFiles.map(xs => xs.map(x => x.label -> x)).map(BuildTargetCache(_)) // .flatMap(fromTargets)
@@ -41,7 +41,7 @@ class Tasks(
   def buildConfig(targets: String*): IO[Unit] = {
 
     api
-      .runBuild(log)(
+      .runBuild(
         (targets.toList ++ List(
           "--aspects",
           aspect,
@@ -52,7 +52,7 @@ class Tasks(
   }
 
   def buildAll(extraFlags: String*): IO[Unit] =
-    api.runBuild(log)("...", "--keep_going").void
+    api.runBuild(("..." :: "--keep_going" :: extraFlags.toList)*).void
 
   def buildTargetFiles: IO[List[BuildTargetFiles]] = {
     import dsl._
@@ -79,6 +79,25 @@ class Tasks(
             )
           }
         }
+  }
+
+  def diagnosticsFiles: IO[Seq[(String, Path)]] = {
+    import dsl._
+
+    val r = uriToPath(root)
+    api.aquery(mnemonic("Scalac")("...")).map { aq =>
+      val ext = ActionQueryResultExtensions(aq)
+      aq.actions.mapFilter { a =>
+        val label = ext.targetMap(a.targetId)
+        val outputs = a.primaryOutputId :: a.outputIds.toList
+        val res = outputs.collectFirstSome { id =>
+          val p = ext.pathFrags(ext.arts(id))
+          if (p.label.endsWith(".diagnosticsproto")) Some(ext.buildPath(p))
+          else None
+        }.map(r / _)
+        res tupleLeft label
+      }
+    }
   }
 
   def diagnosticsProtos: IO[Seq[(String, diagnostics.TargetDiagnostics)]] = {

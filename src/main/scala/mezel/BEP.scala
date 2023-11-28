@@ -26,8 +26,14 @@ import fs2.concurrent.Channel
 import _root_.io.bazel.rules_scala.diagnostics.diagnostics
 import cats.effect.std.Supervisor
 import com.google.devtools.build.lib.buildeventstream.{build_event_stream => bes}
+import scala.concurrent.duration._
+import fs2.io.Watcher
+import com.google.protobuf.CodedInputStream
 
 def parseBEP(path: Path): Stream[IO, bes.BuildEvent] =
-  Files[IO].readAll(path).through(fs2.io.toInputStream[IO]).flatMap{ is =>
-    Stream.repeatEval(IO.blocking(bes.BuildEvent.parseDelimitedFrom(is))).unNoneTerminate
+  Files[IO].tail(path, pollDelay = 50.millis).through(fs2.io.toInputStream[IO]).flatMap { is =>
+    Stream
+      .repeatEval(IO.blocking(bes.BuildEvent.parseDelimitedFrom(is)))
+      .unNoneTerminate
+      .takeWhile(x => !x.payload.isFinished)
   }

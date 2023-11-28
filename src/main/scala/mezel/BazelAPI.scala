@@ -22,10 +22,17 @@ import alleycats.*
 import fs2.io.process.*
 import scalapb._
 
-class BazelAPI(rootDir: Path) {
+class BazelAPI(rootDir: Path, log: Pipe[IO, String, Unit]) {
+  def pipe: Pipe[IO, Byte, Unit] = _.through(fs2.text.utf8.decode).through(fs2.text.lines).through(log)
+
   def run(pb: ProcessBuilder): Resource[IO, Process[IO]] =
-    // Resource.eval(IO.println(s"running bazel command: ${pb.command} ${pb.args.map(x => s"'$x'").mkString(" ")}")) >>
-    pb.spawn[IO]
+    Resource.eval {
+      log {
+        Stream {
+          s"running bazel command: ${pb.command} ${pb.args.map(x => s"'$x'").mkString(" ")}"
+        }
+      }.compile.drain
+    } >> pb.spawn[IO]
 
   def builder(cmd: String, printLogs: Boolean, args: String*) = {
     ProcessBuilder("bazel", cmd :: List("--noshow_loading_progress", "--noshow_progress").filter(_ => !printLogs) ++ args.toList)
@@ -47,8 +54,7 @@ class BazelAPI(rootDir: Path) {
   def aquery(q: AnyQuery, extra: String*): IO[analysis_v2.ActionGraphContainer] =
     runAndParse[analysis_v2.ActionGraphContainer]("aquery", (q.render :: "--output=proto" :: extra.toList)*)
 
-  def runBuild(log: Pipe[IO, String, Unit])(cmds: String*): IO[Int] = {
-    def pipe: Pipe[IO, Byte, Unit] = _.through(fs2.text.utf8.decode).through(fs2.text.lines).through(log)
+  def runBuild(cmds: String*): IO[Int] = {
 
     run(builder("build", printLogs = true, cmds*)).use { p =>
       Stream
