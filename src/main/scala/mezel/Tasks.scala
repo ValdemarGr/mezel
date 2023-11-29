@@ -29,17 +29,18 @@ import com.google.devtools.build.lib.buildeventstream.{build_event_stream => bes
 
 class Tasks(
     root: SafeUri,
-    log: Pipe[IO, String, Unit]
+    log: Pipe[IO, String, Unit],
+    buildArgs: List[String],
+    aqueryArgs: List[String]
 ) {
   val aspect = "@mezel//aspects:aspect.bzl%mezel_aspect"
 
-  def api = BazelAPI(uriToPath(root), log)
+  def api = BazelAPI(uriToPath(root), log, buildArgs, aqueryArgs)
 
   def buildTargetCache: IO[BuildTargetCache] =
     buildTargetFiles.map(xs => xs.map(x => x.label -> x)).map(BuildTargetCache(_)) // .flatMap(fromTargets)
 
   def buildConfig(targets: String*): IO[Unit] = {
-
     api
       .runBuild(
         (targets.toList ++ List(

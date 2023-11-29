@@ -21,25 +21,52 @@ import catcheffect.*
 import fs2.concurrent.Channel
 import cats.effect.std.Supervisor
 import com.google.devtools.build.lib.buildeventstream.{build_event_stream => bes}
+import com.monovore.decline.effect.CommandIOApp
+import com.monovore.decline.*
 
-object Main extends IOApp {
-  def run(args: List[String]): IO[ExitCode] = {
-    if (args.contains("--filesystem")) {
-      runWithIO(
+object Main
+    extends CommandIOApp(
+      "Mezel BSP server",
+      "A BSP server for Bazel"
+    ) {
+  val fsFlag = Opts
+    .flag(
+      "filesystem",
+      "Filesystem mode for local testing ('/tmp/from-metals' and '/tmp/to-metals')"
+    )
+    .orFalse
+
+  val buildArgsFlag = Opts.options[String](
+    "build-arg",
+    "Extra arguments to pass to bazel build, like for instance a toolchain meant for LSP"
+  ).orEmpty
+
+  val aqueryArgsFlag = Opts.options[String](
+    "aquery-arg",
+    "Extra arguments to pass to bazel aquery, like for instance a toolchain meant for LSP"
+  ).orEmpty
+
+  def main: Opts[IO[ExitCode]] = (fsFlag, buildArgsFlag, aqueryArgsFlag).mapN { case (fs, buildArgs, aqueryArgs) =>
+    val (stdin, stdout) = if (fs) {
+      (
         Files[IO].tail(Path("/tmp/from-metals")),
         Files[IO].writeAll(Path("/tmp/to-metals"))
       )
     } else {
-      runWithIO(
+      (
         fs2.io.stdin[IO](4096),
         fs2.io.stdout[IO]
       )
     }
-  }.as(ExitCode.Success)
+
+    runWithIO(stdin, stdout, buildArgs, aqueryArgs).as(ExitCode.Success)
+  }
 
   def runWithIO(
       read: Stream[IO, Byte],
-      write: Pipe[IO, Byte, Unit]
+      write: Pipe[IO, Byte, Unit],
+      buildArgs: List[String],
+      aqueryArgs: List[String]
   ): IO[Unit] =
     SignallingRef.of[IO, BspState](BspState.empty).flatMap { state =>
       Files[IO].tempDirectory(None, "mezel-semanticdb-cache", None).use { tmp =>
@@ -62,7 +89,7 @@ object Main extends IOApp {
 
                         val runRequest: IO[Either[BspResponseError, Option[Json]]] = C
                           .use[BspResponseError] { implicit R =>
-                            val ops: BspServerOps = new BspServerOps(state, done, sup, output, tmp)
+                            val ops: BspServerOps = new BspServerOps(state, done, sup, output, tmp, buildArgs, aqueryArgs)
 
                             x.method match {
                               case "build/initialize"       => expect[InitializeBuildParams].flatMap(ops.initalize)
@@ -87,7 +114,6 @@ object Main extends IOApp {
                               case m                               => IO.raiseError(new RuntimeException(s"Unknown method: $m"))
                             }
                           }
-
 
                         val handleError: IO[Option[Response]] = runRequest.map {
                           case Left(err)    => Some(Response("2.0", x.id, None, Some(err.responseError)))

@@ -68,7 +68,9 @@ lazy val root = project
       scalapb.gen(scala3Sources = true) -> (Compile / sourceManaged).value / "scalapb"
     ),
     libraryDependencies ++= Seq(
-      "com.thesamet.scalapb" %% "scalapb-runtime" % scalapb.compiler.Version.scalapbVersion % "protobuf"
+      "com.thesamet.scalapb" %% "scalapb-runtime" % scalapb.compiler.Version.scalapbVersion % "protobuf",
+      "com.monovore" %% "decline" % "2.4.1",
+      "com.monovore" %% "decline-effect" % "2.4.1"
     ),
     fork := true,
     graalVMNativeImageOptions ++= Seq(

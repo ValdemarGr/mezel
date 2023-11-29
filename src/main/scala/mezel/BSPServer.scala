@@ -168,7 +168,9 @@ class BspServerOps(
     requestDone: Deferred[IO, Unit],
     sup: Supervisor[IO],
     output: Channel[IO, Json],
-    cache: Path
+    cache: Path,
+    buildArgs: List[String],
+    aqueryArgs: List[String]
 )(implicit R: Raise[IO, BspResponseError]) {
   import _root_.io.circe.syntax.*
 
@@ -245,7 +247,9 @@ class BspServerOps(
       wsr,
       _.evalMap { x =>
         sendNotification("build/logMessage", LogMessageParams(MessageType.Info, None, None, x))
-      }
+      },
+      buildArgs,
+      aqueryArgs
     )
   }
 

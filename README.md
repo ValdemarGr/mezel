@@ -18,19 +18,22 @@ http_archive(
 ```
 
 Your Scala toolchain needs to be configured to emit semanticdb files and diagnostics.
+I recommend having a separate toolchain for your LSP server, so that you can have different settings for it.
 ```starlark
 load("@io_bazel_rules_scala//scala:scala_toolchain.bzl", "scala_toolchain")
 
 scala_toolchain(
-    name = "my_toolchain",
-    # other settings like your scalac flags...
+    name = "my_lsp_toolchain",
     enable_diagnostics_report = True,
     enable_semanticdb = True
+    # other settings...
+    # for the best editor experince I recommend not having fatal warnings and
+    # not having 'strict_deps_mode' and 'unused_dependency_checker_mode' set to error
 )
 
 toolchain(
-    name = "toolchain",
-    toolchain = "my_toolchain",
+    name = "lsp_toolchain",
+    toolchain = "my_lsp_toolchain",
     toolchain_type = "@io_bazel_rules_scala//scala:toolchain_type"
 )
 ```

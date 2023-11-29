@@ -22,7 +22,12 @@ import alleycats.*
 import fs2.io.process.*
 import scalapb._
 
-class BazelAPI(rootDir: Path, log: Pipe[IO, String, Unit]) {
+class BazelAPI(
+    rootDir: Path,
+    log: Pipe[IO, String, Unit],
+    buildArgs: List[String],
+    aqueryArgs: List[String]
+) {
   def pipe: Pipe[IO, Byte, Unit] = _.through(fs2.text.utf8.decode).through(fs2.text.lines).through(log)
 
   def run(pb: ProcessBuilder): Resource[IO, Process[IO]] =
@@ -42,21 +47,31 @@ class BazelAPI(rootDir: Path, log: Pipe[IO, String, Unit]) {
   def runAndParse[A <: GeneratedMessage](cmd: String, args: String*)(implicit ev: GeneratedMessageCompanion[A]): IO[A] = {
     run(builder(cmd, printLogs = false, args*))
       .use { proc =>
-        fs2.io
+        val fg = fs2.io
           .toInputStreamResource(proc.stdout)
           .use(is => IO.interruptibleMany(ev.parseFrom(is)))
+
+        fg <& proc.stderr.through(pipe).compile.drain
       }
   }
 
-  def query(q: Query): IO[build.QueryResult] =
-    runAndParse[build.QueryResult]("query", q.render, "--output=proto")
+  // def query(q: Query): IO[build.QueryResult] =
+  //   runAndParse[build.QueryResult]("query", q.render, "--output=proto")
 
-  def aquery(q: AnyQuery, extra: String*): IO[analysis_v2.ActionGraphContainer] =
-    runAndParse[analysis_v2.ActionGraphContainer]("aquery", (q.render :: "--output=proto" :: extra.toList)*)
+  def aquery(q: AnyQuery, extra: String*): IO[analysis_v2.ActionGraphContainer] = {
+    val fa = runAndParse[analysis_v2.ActionGraphContainer]("aquery", (q.render :: "--output=proto" :: extra.toList ++ aqueryArgs)*)
+    // https://github.com/bazelbuild/bazel/issues/15716
+    fa.handleErrorWith { _ =>
+      log {
+        Stream("Bazel aquery failed, this might be because of 'https://github.com/bazelbuild/bazel/issues/15716', retrying once")
+      }.compile.drain *>
+        fa
+    }
+  }
 
   def runBuild(cmds: String*): IO[Int] = {
 
-    run(builder("build", printLogs = true, cmds*)).use { p =>
+    run(builder("build", printLogs = true, (cmds.toList ++ buildArgs)*)).use { p =>
       Stream
         .eval(p.exitValue)
         .concurrently(p.stdout.through(pipe))

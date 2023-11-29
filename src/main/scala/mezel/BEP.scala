@@ -30,10 +30,11 @@ import scala.concurrent.duration._
 import fs2.io.Watcher
 import com.google.protobuf.CodedInputStream
 
-def parseBEP(path: Path): Stream[IO, bes.BuildEvent] =
+def parseBEP(path: Path): Stream[IO, bes.BuildEvent] = {
   Files[IO].tail(path, pollDelay = 50.millis).through(fs2.io.toInputStream[IO]).flatMap { is =>
     Stream
       .repeatEval(IO.blocking(bes.BuildEvent.parseDelimitedFrom(is)))
       .unNoneTerminate
       .takeWhile(x => !x.payload.isFinished)
   }
+}
