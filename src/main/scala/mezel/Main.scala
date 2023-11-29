@@ -42,7 +42,7 @@ object Main extends IOApp {
       write: Pipe[IO, Byte, Unit]
   ): IO[Unit] =
     SignallingRef.of[IO, BspState](BspState.empty).flatMap { state =>
-      Files[IO].tempDirectory.use { tmp =>
+      Files[IO].tempDirectory(None, "mezel-semanticdb-cache", None).use { tmp =>
         Catch.ioCatch.flatMap { implicit C =>
           C.use[Unit] { Exit =>
             Channel.bounded[IO, Json](64).flatMap { output =>

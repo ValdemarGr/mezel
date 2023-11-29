@@ -216,7 +216,29 @@ class BspServerOps(
   def sendNotification[A: Encoder](method: String, params: A): IO[Unit] =
     output.send(Notification("2.0", method, Some(params.asJson)).asJson).void
 
-  def cachedSemanticdbPath(targetroot: String) = cache / targetroot
+  def semanticdbCachePath(targetroot: String): Path =
+    cache / targetroot
+
+  def cacheSemanticdbPath(root: SafeUri, targetroot: String): IO[Unit] = {
+    val r = uriToPath(root)
+    val actualDir = r / Path(targetroot)
+    val cacheDir = semanticdbCachePath(targetroot)
+
+    val ls = Files[IO].walk(actualDir).evalFilterNot(Files[IO].isDirectory)
+    // Files[IO].list(actualDir, "*.semanticdb")
+
+    Files[IO].exists(cacheDir).flatMap {
+      case true  => Files[IO].deleteRecursively(cacheDir)
+      case false => IO.unit
+    } *>
+      ls.evalMap { p =>
+        val fileRelativeToTargetRoot = actualDir.absolute.relativize(p.absolute)
+        val targetFile = cacheDir / fileRelativeToTargetRoot
+        targetFile.parent.traverse_(Files[IO].createDirectories) *>
+          Files[IO].copy(p.absolute, targetFile, CopyFlags(CopyFlag.ReplaceExisting))
+      }.compile
+        .drain
+  }
 
   def tasks = workspaceRoot.map { wsr =>
     Tasks(
@@ -278,48 +300,59 @@ class BspServerOps(
           t.diagnosticsFiles.map(_.toMap).flatMap { diagnosticsFiles =>
             Files[IO].tempFile
               .use { tmp =>
-                val labelStream = Stream.eval(readId).flatMap { xs =>
-                  val bspLabels = xs.map { case (id, _) => id }.toSet
-                  parseBEP(tmp).mapFilter { x =>
-                    for {
-                      comp <- x.payload.completed
-                      id <- x.id
-                      targetCompletedId <- id.id.targetCompleted
-                      label <- Some(targetCompletedId.label).filter(bspLabels.contains)
-                    } yield (label, comp.success)
+                val writeFiles = Stream.eval(readId).flatMap { xs =>
+                  Stream.eval(readScalacOptions).flatMap { scalacOptions =>
+                    val scalacOptionsMap = scalacOptions.toMap
+                    val bspLabels = xs.map { case (id, _) => id }.toSet
+
+                    val labelStream =
+                      parseBEP(tmp).mapFilter { x =>
+                        for {
+                          comp <- x.payload.completed
+                          id <- x.id
+                          targetCompletedId <- id.id.targetCompleted
+                          label <- Some(targetCompletedId.label).filter(bspLabels.contains)
+                        } yield (label, comp.success)
+                      }
+
+                    labelStream.parEvalMapUnorderedUnbounded { case (label, success) =>
+                      val readDiagnostics: IO[diagnostics.TargetDiagnostics] =
+                        Files[IO]
+                          .readAll(diagnosticsFiles(label))
+                          .through(fs2.io.toInputStream[IO])
+                          .evalMap(is => IO.blocking(diagnostics.TargetDiagnostics.parseFrom(is)))
+                          .compile
+                          .lastOrError
+
+                      // if there are no diagnostics for a target, clear the diagnostics
+                      // if there are diagnostics for a target, publish them
+                      val publishDiag: IO[Unit] = readDiagnostics.flatMap { td =>
+                        val bti = buildIdent(label)
+                        val xs = convertDiagnostic(wsr, bti, td)
+                        val prevHere = prevDiagnostics.get(bti).toList.flatten
+                        val toClear = prevHere.toSet -- xs.map(_.textDocument)
+
+                        xs.traverse(x => publishDiagnostics(x) *> cacheDiagnostic(bti, x.textDocument)) *>
+                          toClear.toList
+                            .map(PublishDiagnosticsParams(_, bti, None, Nil, true))
+                            .traverse_(publishDiagnostics)
+                      }
+
+                      // if success then there are semanticdb files to publish
+                      // if !success then use cached semanticdb files
+                      val writeSemanticDB =
+                        if (success) {
+                          scalacOptionsMap.get(label).traverse_ { sco =>
+                            cacheSemanticdbPath(wsr, sco.targetroot)
+                          }
+                        } else IO.unit
+
+                      publishDiag *> writeSemanticDB
+                    }
                   }
                 }
 
-                val diagnosticsPublications = labelStream.parEvalMapUnorderedUnbounded { case (label, success) =>
-                  val readDiagnostics: IO[diagnostics.TargetDiagnostics] =
-                    Files[IO]
-                      .readAll(diagnosticsFiles(label))
-                      .through(fs2.io.toInputStream[IO])
-                      .evalMap(is => IO.blocking(diagnostics.TargetDiagnostics.parseFrom(is)))
-                      .compile
-                      .lastOrError
-
-                  // if there are no diagnostics for a target, clear the diagnostics
-                  // if there are diagnostics for a target, publish them
-                  val publishDiag: IO[Unit] = readDiagnostics.flatMap { td =>
-                    val bti = buildIdent(label)
-                    val xs = convertDiagnostic(wsr, bti, td)
-                    val prevHere = prevDiagnostics.get(bti).toList.flatten
-                    val toClear = prevHere.toSet -- xs.map(_.textDocument)
-
-                    xs.traverse(x => publishDiagnostics(x) *> cacheDiagnostic(bti, x.textDocument)) *>
-                      toClear.toList
-                        .map(PublishDiagnosticsParams(_, bti, None, Nil, true))
-                        .traverse_(publishDiagnostics)
-                  }
-
-                  // if success then there are semanticdb files to publish
-                  // if !success then use cached semanticdb files
-
-                  publishDiag
-                }
-
-                diagnosticsPublications
+                writeFiles
                   .merge(Stream.eval(t.buildAll(s"--build_event_binary_file=${tmp.absolute.toString()}")))
                   .compile
                   .drain
@@ -373,16 +406,17 @@ class BspServerOps(
         Some {
           ScalacOptionsResult {
             scos.toList.map { case (label, sco) =>
+              val semanticdbDir = semanticdbCachePath(sco.targetroot)
               ScalacOptionsItem(
                 buildIdent(label),
                 (sco.scalacopts ++ List(
-                  s"-P:semanticdb:targetroot:${(r / sco.targetroot).toString /*cachedSemanticdbPath(sco.targetroot)*/}",
-                  s"-P:semanticdb:sourceroot:${(r / sco.targetroot).toString /*cachedSemanticdbPath(sco.targetroot)*/}",
+                  s"-P:semanticdb:targetroot:${semanticdbDir.toString /*cachedSemanticdbPath(sco.targetroot)*/}",
+                  s"-P:semanticdb:sourceroot:${semanticdbDir.toString /*cachedSemanticdbPath(sco.targetroot)*/}",
                   "-Xplugin-require:semanticdb",
                   s"-Xplugin:${(r / execRoot / Path(sco.semanticdbPlugin))}"
                 ) ++ sco.plugins.map(x => s"-Xplugin:${r / Path(x)}")).distinct,
                 sco.classpath.map(x => pathFullToUri(wsr, Path(x))),
-                pathFullToUri(wsr, execRoot / sco.targetroot).value // cachedSemanticdbPath(sco.targetroot).absolute.toString()
+                semanticdbDir.toString // cachedSemanticdbPath(sco.targetroot).absolute.toString()
               )
             }
           }.asJson
