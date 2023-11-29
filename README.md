@@ -1,4 +1,4 @@
-# mezel
+# Mezel
 Mezel is a Scala [BSP](https://build-server-protocol.github.io/) implementation for Bazel.
 Mezel acts as a communication layer between Bazel and Scala BSP consumers such as [Metals](https://scalameta.org/metals/).
 
