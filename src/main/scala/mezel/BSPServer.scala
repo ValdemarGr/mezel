@@ -343,13 +343,19 @@ class BspServerOps(
 
   def sources(targets: List[SafeUri]): IO[Option[Json]] =
     workspaceRoot.flatMap { wsr =>
+      val r = uriToPath(wsr)
+      val folderName = r.fileName.toString()
+      val execRoot = Path(s"bazel-${folderName}")
       readSources.map { srcs =>
         Some {
           SourcesResult {
             srcs.toList.map { case (label, src) =>
               SourcesItem(
                 buildIdent(label),
-                src.sources.map(x => pathFullToUri(wsr, Path(x))).map(SourceItem(_, SourceItemKind.File, false)).toList,
+                src.sources
+                  .map(x => pathFullToUri(wsr, execRoot / Path(x)))
+                  .map(SourceItem(_, SourceItemKind.File, false))
+                  .toList,
                 Nil
               )
             }
@@ -369,13 +375,14 @@ class BspServerOps(
             scos.toList.map { case (label, sco) =>
               ScalacOptionsItem(
                 buildIdent(label),
-                sco.scalacopts ++ List(
+                (sco.scalacopts ++ List(
                   s"-P:semanticdb:targetroot:${(r / sco.targetroot).toString /*cachedSemanticdbPath(sco.targetroot)*/}",
+                  s"-P:semanticdb:sourceroot:${(r / sco.targetroot).toString /*cachedSemanticdbPath(sco.targetroot)*/}",
                   "-Xplugin-require:semanticdb",
                   s"-Xplugin:${(r / execRoot / Path(sco.semanticdbPlugin))}"
-                ) ++ sco.plugins.map(x => s"-Xplugin:${r / Path(x)}"),
+                ) ++ sco.plugins.map(x => s"-Xplugin:${r / Path(x)}")).distinct,
                 sco.classpath.map(x => pathFullToUri(wsr, Path(x))),
-                (r / execRoot / sco.targetroot).toString // cachedSemanticdbPath(sco.targetroot).absolute.toString()
+                pathFullToUri(wsr, execRoot / sco.targetroot).value // cachedSemanticdbPath(sco.targetroot).absolute.toString()
               )
             }
           }.asJson

@@ -57,7 +57,9 @@ def _mezel_aspect(target, ctx):
   direct_dep_labels = [x.label for x in dep_outputs]
 
   transitive_labels = depset([target.label], transitive = [x.transitive_labels for x in dep_outputs])
-  ignore = transitive_labels.to_list()
+  # IDK why, but ignoring generated jars breaks the build, even though we are careful whith what we ignore.?
+  # maybe it is because metals doesn't respect transitive projects? I don't know.
+  ignore = [] #transitive_labels.to_list()
 
   transitive_compile_jars = target[JavaInfo].transitive_compile_time_jars.to_list()
   cp_jars = [x.path for x in transitive_compile_jars if x.owner not in ignore]
