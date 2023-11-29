@@ -2,10 +2,10 @@
 
 Mezel needs an aspect to work, so you can add the following to your `WORKSPACE` file to get it into scope:
 ```starlark
-mezel_version = "commit id"  # update this as needed
+mezel_version = "365947b5175a280ad1fb1e790ad4905406f762d7"  # update this as needed
 http_archive(
     name = "mezel",
-    sha256 = "hash (bazel can tell you this also)",
+    sha256 = "hash (bazel can tell you this)",
     strip_prefix = "mezel-%s" % mezel_version,
     type = "zip",
     url = "https://github.com/valdemargr/mezel/archive/%s.zip" % mezel_version,
