@@ -6,7 +6,7 @@ import cats.implicits.*
 import io.circe.parser.*
 import io.circe.*
 import fs2.*
-import cats.effect.*
+import cats.effect.{Trace => _, *}
 import fs2.io.file.*
 import cats.parse.Parser as P
 import cats.parse.Parser0 as P0
@@ -26,14 +26,15 @@ class BazelAPI(
     rootDir: Path,
     buildArgs: List[String],
     aqueryArgs: List[String],
-    logger: Logger
+    logger: Logger,
+    trace: Trace
 ) {
   def pipe: Pipe[IO, Byte, String] = _.through(fs2.text.utf8.decode).through(fs2.text.lines)
 
   def run(pb: ProcessBuilder): Resource[IO, Process[IO]] =
-    Resource.eval {
-      logger.logInfo(s"running bazel command: ${pb.command} ${pb.args.map(x => s"'$x'").mkString(" ")}")
-    } >> pb.spawn[IO]
+    trace.traceResource(s"bazel command ${(pb.command :: pb.args).map(x => s"'$x'").mkString(" ")}") {
+      pb.spawn[IO]
+    }
 
   def builder(cmd: String, printLogs: Boolean, args: String*) = {
     ProcessBuilder("bazel", cmd :: List("--noshow_loading_progress", "--noshow_progress").filter(_ => !printLogs) ++ args.toList)

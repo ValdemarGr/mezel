@@ -7,7 +7,7 @@ import cats.implicits.*
 import io.circe.parser.*
 import io.circe.*
 import fs2.*
-import cats.effect.*
+import cats.effect.{Trace => _, *}
 import fs2.io.file.*
 import cats.parse.Parser as P
 import cats.parse.Parser0 as P0
@@ -171,7 +171,8 @@ class BspServerOps(
     cache: Path,
     buildArgs: List[String],
     aqueryArgs: List[String],
-    logger: Logger
+    logger: Logger,
+    trace: Trace
 )(implicit R: Raise[IO, BspResponseError]) {
   import _root_.io.circe.syntax.*
 
@@ -189,17 +190,28 @@ class BspServerOps(
 
   def readId = readBuildTargetCache(x => Stream.emits(x.buildTargets))
 
-  def readBuildTargets = readBuildTargetCache(_.readBuildTargets)
+  def readBuildTargets =
+    trace.trace("readBuildTargets") {
+      readBuildTargetCache(_.readBuildTargets)
+    }
 
-  def readScalacOptions = readBuildTargetCache(_.readScalacOptions)
+  def readScalacOptions =
+    trace.trace("readScalacOptions") {
+      readBuildTargetCache(_.readScalacOptions)
+    }
 
-  def readSources = readBuildTargetCache(_.readSources)
+  def readSources =
+    trace.trace("readSources") {
+      readBuildTargetCache(_.readSources)
+    }
 
-  def readDependencySources = readBuildTargetCache(_.readDependencySources)
+  def readDependencySources =
+    trace.trace("readDependencySources") {
+      readBuildTargetCache(_.readDependencySources)
+    }
 
-  def prevDiagnostics: IO[Map[BuildTargetIdentifier, List[TextDocumentIdentifier]]] = state.modify { s =>
-    s.copy(prevDiagnostics = Map.empty) -> s.prevDiagnostics
-  }
+  def prevDiagnostics: IO[Map[BuildTargetIdentifier, List[TextDocumentIdentifier]]] =
+    state.modify(s => s.copy(prevDiagnostics = Map.empty) -> s.prevDiagnostics)
 
   def cacheDiagnostic(buildTarget: BuildTargetIdentifier, td: TextDocumentIdentifier): IO[Unit] =
     state.update { s =>
@@ -243,7 +255,7 @@ class BspServerOps(
         .drain
   }
 
-  def tasks = workspaceRoot.map(Tasks(_, buildArgs, aqueryArgs, logger))
+  def tasks = workspaceRoot.map(Tasks(_, buildArgs, aqueryArgs, logger, trace))
 
   def initalize(msg: InitializeBuildParams): IO[Option[Json]] =
     state
@@ -302,14 +314,18 @@ class BspServerOps(
                     val bspLabels = xs.map { case (id, _) => id }.toSet
 
                     val labelStream =
-                      parseBEP(tmp).mapFilter { x =>
-                        for {
-                          comp <- x.payload.completed
-                          id <- x.id
-                          targetCompletedId <- id.id.targetCompleted
-                          label <- Some(targetCompletedId.label).filter(bspLabels.contains)
-                        } yield (label, comp.success)
-                      }
+                      trace
+                        .traceStream("parse bazel BEP") {
+                          parseBEP(tmp)
+                        }
+                        .mapFilter { x =>
+                          for {
+                            comp <- x.payload.completed
+                            id <- x.id
+                            targetCompletedId <- id.id.targetCompleted
+                            label <- Some(targetCompletedId.label).filter(bspLabels.contains)
+                          } yield (label, comp.success)
+                        }
 
                     labelStream.parEvalMapUnorderedUnbounded { case (label, success) =>
                       val readDiagnostics: IO[diagnostics.TargetDiagnostics] =

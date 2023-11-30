@@ -96,30 +96,33 @@ object Main
                         val runRequest: IO[Either[BspResponseError, Option[Json]]] = C
                           .use[BspResponseError] { implicit R =>
                             val lg = Logger.make(None, originId)(x => output.send(x.asJson).void)
+                            val trace = Trace.in(x.method, lg)
                             val ops: BspServerOps =
-                              new BspServerOps(state, done, sup, output, tmp, buildArgs, aqueryArgs, lg)
+                              new BspServerOps(state, done, sup, output, tmp, buildArgs, aqueryArgs, lg, trace)
 
-                            x.method match {
-                              case "build/initialize"       => expect[InitializeBuildParams].flatMap(ops.initalize)
-                              case "build/initialized"      => IO.pure(None)
-                              case "workspace/buildTargets" => ops.buildTargets
-                              case "buildTarget/scalacOptions" =>
-                                expect[ScalacOptionsParams].flatMap(p => ops.scalacOptions(p.targets.map(_.uri)))
-                              case "buildTarget/javacOptions" => IO.pure(Some(ScalacOptionsResult(Nil).asJson))
-                              case "buildTarget/sources" =>
-                                expect[SourcesParams].flatMap(sps => ops.sources(sps.targets.map(_.uri)))
-                              case "buildTarget/dependencySources" =>
-                                expect[DependencySourcesParams].flatMap(dsp => ops.dependencySources(dsp.targets.map(_.uri)))
-                              case "buildTarget/scalaMainClasses" =>
-                                IO.pure(Some(ScalaMainClassesResult(Nil, None).asJson))
-                              case "buildTarget/jvmRunEnvironment" =>
-                                IO.pure(Some(JvmRunEnvironmentResult(Nil).asJson))
-                              case "buildTarget/scalaTestClasses" =>
-                                IO.pure(Some(ScalaTestClassesResult(Nil).asJson))
-                              case "buildTarget/compile" =>
-                                expect[CompileParams].flatMap(p => ops.compile(p.targets.map(_.uri)))
-                              case "build/exit" | "build/shutdown" => Exit.raise(())
-                              case m                               => IO.raiseError(new RuntimeException(s"Unknown method: $m"))
+                            trace.trace("root") {
+                              x.method match {
+                                case "build/initialize"       => expect[InitializeBuildParams].flatMap(ops.initalize)
+                                case "build/initialized"      => IO.pure(None)
+                                case "workspace/buildTargets" => ops.buildTargets
+                                case "buildTarget/scalacOptions" =>
+                                  expect[ScalacOptionsParams].flatMap(p => ops.scalacOptions(p.targets.map(_.uri)))
+                                case "buildTarget/javacOptions" => IO.pure(Some(ScalacOptionsResult(Nil).asJson))
+                                case "buildTarget/sources" =>
+                                  expect[SourcesParams].flatMap(sps => ops.sources(sps.targets.map(_.uri)))
+                                case "buildTarget/dependencySources" =>
+                                  expect[DependencySourcesParams].flatMap(dsp => ops.dependencySources(dsp.targets.map(_.uri)))
+                                case "buildTarget/scalaMainClasses" =>
+                                  IO.pure(Some(ScalaMainClassesResult(Nil, None).asJson))
+                                case "buildTarget/jvmRunEnvironment" =>
+                                  IO.pure(Some(JvmRunEnvironmentResult(Nil).asJson))
+                                case "buildTarget/scalaTestClasses" =>
+                                  IO.pure(Some(ScalaTestClassesResult(Nil).asJson))
+                                case "buildTarget/compile" =>
+                                  expect[CompileParams].flatMap(p => ops.compile(p.targets.map(_.uri)))
+                                case "build/exit" | "build/shutdown" => Exit.raise(())
+                                case m                               => IO.raiseError(new RuntimeException(s"Unknown method: $m"))
+                              }
                             }
                           }
 

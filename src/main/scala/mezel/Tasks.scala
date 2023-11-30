@@ -6,7 +6,7 @@ import cats.implicits.*
 import io.circe.parser.*
 import io.circe.*
 import fs2.*
-import cats.effect.*
+import cats.effect.{Trace => _, *}
 import fs2.io.file.*
 import cats.parse.Parser as P
 import cats.parse.Parser0 as P0
@@ -31,16 +31,17 @@ class Tasks(
     root: SafeUri,
     buildArgs: List[String],
     aqueryArgs: List[String],
-    logger: Logger
+    logger: Logger,
+    trace: Trace
 ) {
   val aspect = "@mezel//aspects:aspect.bzl%mezel_aspect"
 
-  def api = BazelAPI(uriToPath(root), buildArgs, aqueryArgs, logger)
+  def api = BazelAPI(uriToPath(root), buildArgs, aqueryArgs, logger, trace)
 
   def buildTargetCache: IO[BuildTargetCache] =
     buildTargetFiles.map(xs => xs.map(x => x.label -> x)).map(BuildTargetCache(_)) // .flatMap(fromTargets)
 
-  def buildConfig(targets: String*): IO[Unit] = {
+  def buildConfig(targets: String*): IO[Unit] = trace.trace("buildConfig") {
     api
       .runBuild(
         (targets.toList ++ List(
@@ -52,10 +53,11 @@ class Tasks(
       .void
   }
 
-  def buildAll(extraFlags: String*): IO[Unit] =
+  def buildAll(extraFlags: String*): IO[Unit] = trace.trace("buildAll") {
     api.runBuild(("..." :: "--keep_going" :: extraFlags.toList)*).void
+  }
 
-  def buildTargetFiles: IO[List[BuildTargetFiles]] = {
+  def buildTargetFiles: IO[List[BuildTargetFiles]] = trace.trace("buildTargetFiles") {
     import dsl._
     buildAll() *>
       buildConfig("...") *>
@@ -82,7 +84,7 @@ class Tasks(
         }
   }
 
-  def diagnosticsFiles: IO[Seq[(String, Path)]] = {
+  def diagnosticsFiles: IO[Seq[(String, Path)]] = trace.trace("diagnosticsFiles") {
     import dsl._
 
     val r = uriToPath(root)
@@ -91,11 +93,13 @@ class Tasks(
       aq.actions.mapFilter { a =>
         val label = ext.targetMap(a.targetId)
         val outputs = a.primaryOutputId :: a.outputIds.toList
-        val res = outputs.collectFirstSome { id =>
-          val p = ext.pathFrags(ext.arts(id))
-          if (p.label.endsWith(".diagnosticsproto")) Some(ext.buildPath(p))
-          else None
-        }.map(r / _)
+        val res = outputs
+          .collectFirstSome { id =>
+            val p = ext.pathFrags(ext.arts(id))
+            if (p.label.endsWith(".diagnosticsproto")) Some(ext.buildPath(p))
+            else None
+          }
+          .map(r / _)
         res tupleLeft label
       }
     }
