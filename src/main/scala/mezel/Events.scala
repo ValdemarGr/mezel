@@ -100,3 +100,9 @@ object DiagnosticSeverity:
 final case class CodeDescription(
     href: SafeUri
 ) derives Encoder.AsObject
+
+final case class PrintParams(
+  originId: String,
+  task: Option[TaskId],
+  message: String
+) derives Encoder.AsObject

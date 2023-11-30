@@ -36,15 +36,19 @@ object Main
     )
     .orFalse
 
-  val buildArgsFlag = Opts.options[String](
-    "build-arg",
-    "Extra arguments to pass to bazel build, like for instance a toolchain meant for LSP"
-  ).orEmpty
+  val buildArgsFlag = Opts
+    .options[String](
+      "build-arg",
+      "Extra arguments to pass to bazel build, like for instance a toolchain meant for LSP"
+    )
+    .orEmpty
 
-  val aqueryArgsFlag = Opts.options[String](
-    "aquery-arg",
-    "Extra arguments to pass to bazel aquery, like for instance a toolchain meant for LSP"
-  ).orEmpty
+  val aqueryArgsFlag = Opts
+    .options[String](
+      "aquery-arg",
+      "Extra arguments to pass to bazel aquery, like for instance a toolchain meant for LSP"
+    )
+    .orEmpty
 
   def main: Opts[IO[ExitCode]] = (fsFlag, buildArgsFlag, aqueryArgsFlag).mapN { case (fs, buildArgs, aqueryArgs) =>
     val (stdin, stdout) = if (fs) {
@@ -82,6 +86,8 @@ object Main
                   .evalMap { x =>
                     Supervisor[IO](await = true).use { sup =>
                       IO.deferred[Unit].flatMap { done =>
+                        val originId = x.params.flatMap(_.asObject).flatMap(_.apply("originId")).flatMap(_.asString)
+
                         def expect[A: Decoder]: IO[A] =
                           IO.fromOption(x.params)(new RuntimeException(s"No params for method ${x.method}"))
                             .map(_.as[A])
@@ -89,7 +95,9 @@ object Main
 
                         val runRequest: IO[Either[BspResponseError, Option[Json]]] = C
                           .use[BspResponseError] { implicit R =>
-                            val ops: BspServerOps = new BspServerOps(state, done, sup, output, tmp, buildArgs, aqueryArgs)
+                            val lg = Logger.make(None, originId)(x => output.send(x.asJson).void)
+                            val ops: BspServerOps =
+                              new BspServerOps(state, done, sup, output, tmp, buildArgs, aqueryArgs, lg)
 
                             x.method match {
                               case "build/initialize"       => expect[InitializeBuildParams].flatMap(ops.initalize)

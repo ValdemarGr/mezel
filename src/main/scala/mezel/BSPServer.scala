@@ -170,7 +170,8 @@ class BspServerOps(
     output: Channel[IO, Json],
     cache: Path,
     buildArgs: List[String],
-    aqueryArgs: List[String]
+    aqueryArgs: List[String],
+    logger: Logger
 )(implicit R: Raise[IO, BspResponseError]) {
   import _root_.io.circe.syntax.*
 
@@ -242,16 +243,7 @@ class BspServerOps(
         .drain
   }
 
-  def tasks = workspaceRoot.map { wsr =>
-    Tasks(
-      wsr,
-      _.evalMap { x =>
-        sendNotification("build/logMessage", LogMessageParams(MessageType.Info, None, None, x))
-      },
-      buildArgs,
-      aqueryArgs
-    )
-  }
+  def tasks = workspaceRoot.map(Tasks(_, buildArgs, aqueryArgs, logger))
 
   def initalize(msg: InitializeBuildParams): IO[Option[Json]] =
     state
@@ -420,7 +412,7 @@ class BspServerOps(
                   s"-Xplugin:${(r / execRoot / Path(sco.semanticdbPlugin))}"
                 ) ++ sco.plugins.map(x => s"-Xplugin:${r / Path(x)}")).distinct,
                 sco.classpath.map(x => pathFullToUri(wsr, Path(x))),
-                semanticdbDir.toString // cachedSemanticdbPath(sco.targetroot).absolute.toString()
+                semanticdbDir.absolute.toNioPath.toUri().toString // cachedSemanticdbPath(sco.targetroot).absolute.toString()
               )
             }
           }.asJson

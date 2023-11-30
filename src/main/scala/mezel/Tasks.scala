@@ -29,13 +29,13 @@ import com.google.devtools.build.lib.buildeventstream.{build_event_stream => bes
 
 class Tasks(
     root: SafeUri,
-    log: Pipe[IO, String, Unit],
     buildArgs: List[String],
-    aqueryArgs: List[String]
+    aqueryArgs: List[String],
+    logger: Logger
 ) {
   val aspect = "@mezel//aspects:aspect.bzl%mezel_aspect"
 
-  def api = BazelAPI(uriToPath(root), log, buildArgs, aqueryArgs)
+  def api = BazelAPI(uriToPath(root), buildArgs, aqueryArgs, logger)
 
   def buildTargetCache: IO[BuildTargetCache] =
     buildTargetFiles.map(xs => xs.map(x => x.label -> x)).map(BuildTargetCache(_)) // .flatMap(fromTargets)
@@ -97,41 +97,6 @@ class Tasks(
           else None
         }.map(r / _)
         res tupleLeft label
-      }
-    }
-  }
-
-  def diagnosticsProtos: IO[Seq[(String, diagnostics.TargetDiagnostics)]] = {
-    import dsl._
-
-    api.aquery(mnemonic("Scalac")("...")).flatMap { aq =>
-      val ext = ActionQueryResultExtensions(aq)
-      val outputs = aq.actions.mapFilter { a =>
-        val label = ext.targetMap(a.targetId)
-        val outputs = a.primaryOutputId :: a.outputIds.toList
-        val res = outputs.collectFirstSome { id =>
-          val p = ext.pathFrags(ext.arts(id))
-          if (p.label.endsWith(".diagnosticsproto")) Some(ext.buildPath(p))
-          else None
-        }
-        res tupleLeft label
-      }
-
-      val r = uriToPath(root)
-      outputs.traverseFilter { case (label, p) =>
-        val fp = r / p
-        Files[IO].exists(fp).flatMap {
-          case false => IO.pure(None)
-          case true =>
-            Files[IO]
-              .readAll(fp)
-              .through(fs2.io.toInputStream[IO])
-              .evalMap(is => IO.blocking(diagnostics.TargetDiagnostics.parseFrom(is)))
-              .compile
-              .lastOrError
-              .tupleLeft(label)
-              .map(Some(_))
-        }
       }
     }
   }

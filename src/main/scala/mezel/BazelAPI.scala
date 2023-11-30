@@ -24,19 +24,15 @@ import scalapb._
 
 class BazelAPI(
     rootDir: Path,
-    log: Pipe[IO, String, Unit],
     buildArgs: List[String],
-    aqueryArgs: List[String]
+    aqueryArgs: List[String],
+    logger: Logger
 ) {
-  def pipe: Pipe[IO, Byte, Unit] = _.through(fs2.text.utf8.decode).through(fs2.text.lines).through(log)
+  def pipe: Pipe[IO, Byte, String] = _.through(fs2.text.utf8.decode).through(fs2.text.lines)
 
   def run(pb: ProcessBuilder): Resource[IO, Process[IO]] =
     Resource.eval {
-      log {
-        Stream {
-          s"running bazel command: ${pb.command} ${pb.args.map(x => s"'$x'").mkString(" ")}"
-        }
-      }.compile.drain
+      logger.logInfo(s"running bazel command: ${pb.command} ${pb.args.map(x => s"'$x'").mkString(" ")}")
     } >> pb.spawn[IO]
 
   def builder(cmd: String, printLogs: Boolean, args: String*) = {
@@ -51,21 +47,17 @@ class BazelAPI(
           .toInputStreamResource(proc.stdout)
           .use(is => IO.interruptibleMany(ev.parseFrom(is)))
 
-        fg <& proc.stderr.through(pipe).compile.drain
+        fg <& proc.stderr.through(pipe).evalMap(logger.printStdErr).compile.drain
       }
   }
-
-  // def query(q: Query): IO[build.QueryResult] =
-  //   runAndParse[build.QueryResult]("query", q.render, "--output=proto")
 
   def aquery(q: AnyQuery, extra: String*): IO[analysis_v2.ActionGraphContainer] = {
     val fa = runAndParse[analysis_v2.ActionGraphContainer]("aquery", (q.render :: "--output=proto" :: extra.toList ++ aqueryArgs)*)
     // https://github.com/bazelbuild/bazel/issues/15716
     fa.handleErrorWith { _ =>
-      log {
-        Stream("Bazel aquery failed, this might be because of 'https://github.com/bazelbuild/bazel/issues/15716', retrying once")
-      }.compile.drain *>
-        fa
+      logger.logWarn {
+        "Bazel aquery failed, this might be because of 'https://github.com/bazelbuild/bazel/issues/15716', retrying once"
+      } *> fa
     }
   }
 
@@ -74,8 +66,8 @@ class BazelAPI(
     run(builder("build", printLogs = true, (cmds.toList ++ buildArgs)*)).use { p =>
       Stream
         .eval(p.exitValue)
-        .concurrently(p.stdout.through(pipe))
-        .concurrently(p.stderr.through(pipe))
+        .concurrently(p.stdout.through(pipe).evalMap(logger.printStdOut))
+        .concurrently(p.stderr.through(pipe).evalMap(logger.printStdErr))
         .compile
         .lastOrError
     }
