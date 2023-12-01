@@ -76,15 +76,15 @@ object Main
       Files[IO].tempDirectory(None, "mezel-semanticdb-cache", None).use { tmp =>
         Catch.ioCatch.flatMap { implicit C =>
           C.use[Unit] { Exit =>
-            Channel.bounded[IO, Json](64).flatMap { output =>
-              val ioStream: Stream[IO, Unit] = {
-                read
-                  .through(fs2.text.utf8.decode)
-                  // .evalTap(x => IO.println(s"Received: data of size ${x.size}"))
-                  .through(jsonRpcRequests)
-                  // .evalTap(x => IO.println(s"Request: ${x.method}"))
-                  .evalMap { x =>
-                    Supervisor[IO](await = true).use { sup =>
+            Supervisor[IO](await = true).use { sup =>
+              Channel.bounded[IO, Json](64).flatMap { output =>
+                val ioStream: Stream[IO, Unit] = {
+                  read
+                    .through(fs2.text.utf8.decode)
+                    // .evalTap(x => IO.println(s"Received: data of size ${x.size}"))
+                    .through(jsonRpcRequests)
+                    // .evalTap(x => IO.println(s"Request: ${x.method}"))
+                    .evalMap { x =>
                       IO.deferred[Unit].flatMap { done =>
                         val originId = x.params.flatMap(_.asObject).flatMap(_.apply("originId")).flatMap(_.asString)
 
@@ -142,17 +142,17 @@ object Main
                         }
                       }
                     }
-                  }
-              }
+                }
 
-              output.stream
-                .concurrently(ioStream)
-                .map(_.spaces2)
-                .map(data => s"Content-Length: ${data.length}\r\n\r\n$data")
-                .through(fs2.text.utf8.encode)
-                .through(write)
-                .compile
-                .drain
+                output.stream
+                  .concurrently(ioStream)
+                  .map(_.spaces2)
+                  .map(data => s"Content-Length: ${data.length}\r\n\r\n$data")
+                  .through(fs2.text.utf8.encode)
+                  .through(write)
+                  .compile
+                  .drain
+              }
             }
           }
         }.void
