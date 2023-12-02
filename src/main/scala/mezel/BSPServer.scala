@@ -255,55 +255,81 @@ class BspServerOps(
         .drain
   }
 
-  def tasks = workspaceRoot.map(Tasks(_, buildArgs, aqueryArgs, logger, trace))
+  def mkTasks(rootUri: SafeUri) = Tasks(rootUri, buildArgs, aqueryArgs, logger, trace)
+
+  def tasks = workspaceRoot.map(mkTasks)
 
   def initalize(msg: InitializeBuildParams): IO[Option[Json]] =
-    state
-      .update(_.copy(workspaceRoot = Some(msg.rootUri)))
-      .as {
-        Some {
-          InitializeBuildResult(
-            displayName = "Mezel",
-            version = "1.0.0",
-            bspVersion = "2.1.0",
-            capabilities = BuildServerCapabilities(
-              compileProvider = Some(AnyProvider(List("scala"))),
-              testProvider = None,
-              runProvider = None,
-              debugProvider = None,
-              inverseSourcesProvider = Some(true),
-              dependencySourcesProvider = Some(true),
-              dependencyModulesProvider = None,
-              resourcesProvider = Some(true),
-              outputPathsProvider = None,
-              buildTargetChangedProvider = Some(false), // can probably be true
-              jvmRunEnvironmentProvider = Some(true),
-              jvmTestEnvironmentProvider = Some(true),
-              canReload = Some(false) // what does this mean?
-            )
-          ).asJson
+    state.get
+      .flatMap { s =>
+        if s.workspaceRoot.isDefined then IO.raiseError(new Exception("already initialized"))
+        else state.update(_.copy(workspaceRoot = Some(msg.rootUri)))
+      } >> {
+      val gw = GraphWatcher(msg.rootUri, mkTasks(msg.rootUri), trace.nested("watcher"))
+      // TODO find roots automatically
+      gw.startWatcher(uriToPath(msg.rootUri) / "src")
+        .flatMap { eventStream =>
+          sup.supervise {
+            eventStream
+              .evalMap { wr =>
+                val combined = (
+                  wr.modified.toList.tupleRight(BuildTargetEventKind.Changed) ++
+                    wr.deleted.toList.tupleRight(BuildTargetEventKind.Deleted) ++
+                    wr.created.toList.tupleRight(BuildTargetEventKind.Created)
+                ).map { case (label, kind) => BuildTargetEvent(buildIdent(label), kind) }
+                combined.toNel.traverse_ { events =>
+                  sendNotification("buildTarget/didChange", DidChangeBuildTarget(events.toList))
+                }
+              }
+              .compile
+              .drain
+          }
         }
-      }
+        .as {
+          Some {
+            InitializeBuildResult(
+              displayName = "Mezel",
+              version = "1.0.0",
+              bspVersion = "2.1.0",
+              capabilities = BuildServerCapabilities(
+                compileProvider = Some(AnyProvider(List("scala"))),
+                testProvider = None,
+                runProvider = None,
+                debugProvider = None,
+                inverseSourcesProvider = Some(true),
+                dependencySourcesProvider = Some(true),
+                dependencyModulesProvider = None,
+                resourcesProvider = Some(true),
+                outputPathsProvider = None,
+                buildTargetChangedProvider = Some(true),
+                jvmRunEnvironmentProvider = Some(true),
+                jvmTestEnvironmentProvider = Some(true),
+                canReload = Some(false) // what does this mean?
+              )
+            ).asJson
+          }
+        }
+    }
 
   def dependencySources(targets: List[SafeUri]): IO[Option[Json]] =
     workspaceRoot.flatMap { wsr =>
-      sup.supervise {
-        val r = uriToPath(wsr) / "src"
-        logger.logInfo(s"watching ${r.absolute.toString()}") >>
-          Files[IO].watch(r).evalMap { e => logger.logInfo(e.toString()) }.compile.drain
-      } *>
-        readDependencySources.map { ds =>
-          Some {
-            DependencySourcesResult {
-              ds.toList.map { case (label, ds) =>
-                DependencySourcesItem(
-                  buildIdent(label),
-                  ds.sourcejars.map(x => pathFullToUri(wsr, Path(x))).toList
-                )
-              }
-            }.asJson
-          }
+      // sup.supervise {
+      //   val r = uriToPath(wsr) / "src"
+      //   logger.logInfo(s"watching ${r.absolute.toString()}") >>
+      //     Files[IO].watch(r).evalMap { e => logger.logInfo(e.toString()) }.compile.drain
+      // } *>
+      readDependencySources.map { ds =>
+        Some {
+          DependencySourcesResult {
+            ds.toList.map { case (label, ds) =>
+              DependencySourcesItem(
+                buildIdent(label),
+                ds.sourcejars.map(x => pathFullToUri(wsr, Path(x))).toList
+              )
+            }
+          }.asJson
         }
+      }
     }
 
   def compile(targets: List[SafeUri]): IO[Option[Json]] = {

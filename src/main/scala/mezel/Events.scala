@@ -102,7 +102,27 @@ final case class CodeDescription(
 ) derives Encoder.AsObject
 
 final case class PrintParams(
-  originId: String,
-  task: Option[TaskId],
-  message: String
+    originId: String,
+    task: Option[TaskId],
+    message: String
 ) derives Encoder.AsObject
+
+final case class DidChangeBuildTarget(
+    changes: List[BuildTargetEvent]
+) derives Encoder.AsObject
+
+final case class BuildTargetEvent(
+    target: BuildTargetIdentifier,
+    kind: BuildTargetEventKind
+) derives Encoder.AsObject
+
+enum BuildTargetEventKind:
+  case Created, Changed, Deleted
+
+object BuildTargetEventKind {
+  given Encoder[BuildTargetEventKind] = Encoder[Int].contramap {
+    case BuildTargetEventKind.Created => 1
+    case BuildTargetEventKind.Changed => 2
+    case BuildTargetEventKind.Deleted => 3
+  }
+}

@@ -2,14 +2,16 @@ package mezel
 
 import cats.implicits._
 import scala.concurrent.duration._
-import cats.effect._
+import cats.effect.{Trace => _, *}
 import fs2.io.file._
 import fs2._
 import cats._
 
-trait GraphWatcher {}
-
-object GraphWatcher {
+class GraphWatcher(
+    root: SafeUri,
+    tasks: Tasks,
+    trace: Trace
+) {
   enum EvType {
     case Created, Deleted, Modified
   }
@@ -26,96 +28,137 @@ object GraphWatcher {
   def eliminateRedundant(events: Chunk[(EvType, Path)]): Chunk[(EvType, Path)] = {
     val m = events.toList.zipWithIndex.groupMap { case ((_, p), _) => p } { case ((et, _), i) => (et, i) }
 
-    val etOrd = Order.by[EvType, Int] {
-      // If there is a created/deleted event use that, otherwise use the modified event
-      case EvType.Created | EvType.Deleted => 0
-      case EvType.Modified                  => 1
+    Chunk.from {
+      m.toList.mapFilter { case (k, vs) =>
+        val sorted = vs.sortBy { case (_, i) => i }
+        // some editors write a file by first deleting it and then creating it
+        // if first is a deleted and it ends with a created, it is a modified
+        // if the first event is created and last is deleted, we ignore it
+        val (hdEt, _) = sorted.head
+        val (lastEt, _) = sorted.last
+
+        (hdEt, lastEt) match {
+          case (EvType.Deleted, EvType.Created) => Some((EvType.Modified, k))
+          case (EvType.Created, EvType.Deleted) => None
+          case _                                => Some((lastEt, k))
+        }
+      }
     }
-
-    val o2 = (etOrd, Order.reverse(Order[Int])).tupled
-
-    val bestEvents = m.toList.map { case (p, xs) => 
-      val (et, _) = xs.min(o2.toOrdering) 
-      (et, p)
-    }
-
-    Chunk.from(bestEvents)
   }
 
-  // BUILD.bazel add/remove -> diff this build target labels import with previous
-  // BUILD.bazel modify -> is file defined at a known build taget label?
-  // *.scala add/remove -> look in newly computed build targets for a ref to this file
-  // *.scala modify -> do nothing, metals will handle it
-  // other file change -> 
-  //   - schema for source code generator, build and metals will detect change in input files
-  //   - schema for jar code generator, must re-import
-  //   - filegroup as data, do nothing
-  //   - other?
-  //
+  def filterFSEvents(events: Chunk[(EvType, Path)]): IO[Chunk[(EvType, Path)]] =
+    events.filterA {
+      case (EvType.Modified | EvType.Created, p) => Files[IO].exists(p)
+      case (EvType.Deleted, p)                   => Files[IO].exists(p).map(!_)
+    }
 
-  // BUILD.bazel add/remove -> diff this build target labels import with previous and reimport
-  // BUILD.bazel modify -> is file defined at a known build taget label? if so, reimport
-  // Disregard *.scala modifications, metals will handle it
-  // For everything else:
-  // bazel query "rdeps(//..., src/main/scala/my_project/my_file.something)" --output proto
-  // This can be batched via:
-  // "rdeps(//..., set(src/main/scala/my_project/my_file.something, src/main/scala/my_project/my_file2.something))"
+  final case class WatchResult(
+      modified: Chunk[String],
+      deleted: Set[String],
+      created: Set[String]
+  )
+  object WatchResult {
+    given Monoid[WatchResult] = new Monoid[WatchResult] {
+      def empty: WatchResult = WatchResult(Chunk.empty, Set.empty, Set.empty)
+      def combine(x: WatchResult, y: WatchResult): WatchResult =
+        WatchResult(
+          x.modified ++ y.modified,
+          x.deleted ++ y.deleted,
+          x.created ++ y.created
+        )
+    }
+  }
+  def computeEvents(
+      prevLabels: Set[String],
+      labels: Set[String],
+      events: Chunk[(EvType, Path)]
+  ): IO[WatchResult] = {
+    val r = uriToPath(root)
+    // This handles creation/deletion of BUILD files
+    val createdLabels = labels -- prevLabels
+    val deletedLabels = prevLabels -- labels
 
-  // def watchAll(root: Path) = {
-  //   // IO.ref()
-  //   Files[IO].watch(root).groupWithin(1024, 50.millis).evalMap { events =>
-  //     val relevant = events.mapFilter {
-  //       case Watcher.Event.Overflow(_)       => None
-  //       case Watcher.Event.NonStandard(_, _) => None
-  //       case Watcher.Event.Created(p, _)     => Some(p)
-  //       case Watcher.Event.Deleted(p, _)     => Some(p)
-  //       case Watcher.Event.Modified(p, _)    => Some(p)
-  //     }
+    // We can only find changes in the workspace (since symlink (execroot) changes are really hard)
+    // Thus we can infer any BUILD location by just using the label
+    val localPaths = labels.toList.mapFilter { x =>
+      if (x.startsWith("@//")) Some(Path(x.drop(3).takeWhile(_ =!= ':')) -> x)
+      else None
+    }.toMap
 
-  //     ???
-  //     // if (relevant.isEmpty) IO.unit
-  //     // else {
-  //     // }
-  //   }
-  // }
+    sealed trait WatchTask
+    object WatchTask {
+      final case class BuildModification(label: String) extends WatchTask
+      final case class FileModification(p: Path) extends WatchTask
+    }
 
-  // def computeHash(
-  //   buildFile: Path,
-  //   activeBuildTargets: Map[Path, BuildTargetFiles]
-  // ): IO[Option[String]] = {
-  //   ???
-  //   // Files[IO].read
-  // }
+    val ys = events.mapFilter { case (et, p) =>
+      val fn = p.fileName.toString
+      if (fn === "BUILD.bazel" || fn === "BUILD") {
+        et match {
+          case EvType.Modified => p.parent.flatMap(localPaths.get).map(WatchTask.BuildModification(_))
+          case _               => None
+        }
+      } else if (fn.endsWith(".scala") || fn.endsWith(".sc")) {
+        et match {
+          case EvType.Modified => None
+          case _               => Some(WatchTask.FileModification(p))
+        }
+      } else Some(WatchTask.FileModification(p))
+    }
 
-  // def go(
-  //     buildFiles: Set[Path],
-  //     events: Chunk[Watcher.Event],
-  //     buildHash: Set[String]
-  // ) = { // : Pipe[IO, Watcher.Event, Path] = { stream =>
-  //   // val parentDirs = buildFiles.map(_.parent).collect{ case Some(x) => x }
-  //   // val parentDirsLst = parentDirs.toList
+    val fileMods: IO[List[String]] = ys
+      .collect { case WatchTask.FileModification(p) => p }
+      .toNel
+      .toList
+      .flatTraverse(xs => tasks.buildTargetRdeps(xs.map(p => r.relativize(p).toString).toList: _*))
 
-  //   // stream.groupWithin(1024, 50.millis).map { events =>
-  //   val paths = events.mapFilter {
-  //     case Watcher.Event.Created(p, _)     => Some(p)
-  //     case Watcher.Event.Deleted(p, _)     => Some(p)
-  //     case Watcher.Event.Modified(p, _)    => Some(p)
-  //     case Watcher.Event.Overflow(_)       => None
-  //     case Watcher.Event.NonStandard(_, _) => None
-  //   }
+    val buildMods: Chunk[String] = ys.collect { case WatchTask.BuildModification(p) => p }
 
-  //   lazy val (changedBuildFiles, changedOtherFiles) = paths.partitionEither { x =>
-  //     if (buildFiles.contains(x)) Right(x) else Left(x)
-  //   }
+    fileMods.map { xs =>
+      WatchResult(
+        (Chunk.from(xs) ++ buildMods).hashDistinct,
+        deletedLabels,
+        createdLabels
+      )
+    }
+  }
 
-  //   // As a heuristic we start by looking at the build file that shares the same parent directory
-  //   // For now let's just reimport all build files
-  //   Stream.iterable(buildFiles).evalMap { p =>
-  //     p
-  //     ???
-  //   }
-  //   // }
+  def startWatcher(
+      root: Path
+      // init: BuildTargetCache
+  ): IO[Stream[IO, WatchResult]] = {
+    val genLabels = trace.trace("genLabels") {
+      tasks.buildTargetCache.map(_.buildTargets.map { case (k, _) => k }.toSet)
+    }
+    genLabels.map { init =>
+      Stream.eval(trace.logger.logInfo(s"Starting watcher for ${root}")) >>
+        Files[IO]
+          .watch(root)
+          .groupWithin(1024, 50.millis)
+          .evalMapAccumulate(init) { case (prev, events) =>
+            trace.logger.logInfo(s"${events.size} events unconsed ${events}") >>
+              genLabels
+                .flatMap { nextLabels =>
+                  val interesting = eliminateRedundant(extractEvents(events))
 
-  //   ???
-  // }
+                  def run(events: Chunk[(EvType, Path)]) =
+                    trace.logger.logInfo(s"handling ${events.size} events after elimination ${events}") >>
+                      computeEvents(prev, nextLabels, events) <*
+                      trace.logger.logInfo(s"successfully handled ${events.size} events")
+
+                  run(interesting)
+                    .handleErrorWith { e =>
+                      trace.logger.logError(s"Error, recovering by handling events one at the time: ${e}") >>
+                        interesting.foldMapA { x =>
+                          run(Chunk(x)).handleErrorWith { e =>
+                            trace.logger.logError(s"Error, failed to handle event ${x}: ${e}").as(Monoid[WatchResult].empty)
+                          }
+                        }
+                    }
+                    .tupleLeft(nextLabels)
+                }
+          }
+          .map { case (_, wr) => wr }
+    }
+  }
 }

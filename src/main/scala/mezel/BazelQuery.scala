@@ -136,8 +136,8 @@ def renderQuery(q: Query): String = {
   import Query._
 
   def go(q: Query): Eval[String] = {
-    def fns(name: String, qs: List[Query]): Eval[String] = Eval.defer:
-      qs.traverse(go).map { args => s"${name}(${args.mkString(", ")})" }
+    def fns(name: String, qs: List[Query], sep: String = ", "): Eval[String] = Eval.defer:
+      qs.traverse(go).map { args => s"${name}(${args.mkString(sep)})" }
 
     def fn(name: String, qs: Query*): Eval[String] = fns(name, qs.toList)
     q match
@@ -164,7 +164,7 @@ def renderQuery(q: Query): String = {
       case Let(name, value, in)       => (go(value), go(in)).mapN((v, i) => s"let $name = ${v} in ${i}")
       case Parens(q)                  => go(q).map(s => s"(${s})")
       case Binary(left, op, right)    => (go(left), go(right)).mapN((l, r) => s"${l} ${renderOp(op)} ${r}")
-      case Set(qs)                    => fns("set", qs)
+      case Set(qs)                    => fns("set", qs, sep = " ")
       case Inputs(w, q)               => fn("inputs", w, q)
       case Outputs(w, q)              => fn("outputs", w, q)
       case Mnemonic(w, q)             => fn("mnemonic", w, q)

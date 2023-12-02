@@ -29,11 +29,17 @@ class BazelAPI(
     logger: Logger,
     trace: Trace
 ) {
+  build.QueryResult
   def pipe: Pipe[IO, Byte, String] = _.through(fs2.text.utf8.decode).through(fs2.text.lines)
 
   def run(pb: ProcessBuilder): Resource[IO, Process[IO]] =
     trace.traceResource(s"bazel command ${(pb.command :: pb.args).map(x => s"'$x'").mkString(" ")}") {
-      pb.spawn[IO]
+      pb.spawn[IO].flatTap { p =>
+        Resource.onFinalize(p.exitValue.flatMap {
+          case 0 => IO.unit
+          case n => IO.raiseError(new Exception(s"Bazel command failed with exit code $n"))
+        })
+      }
     }
 
   def builder(cmd: String, printLogs: Boolean, args: String*) = {
@@ -51,6 +57,9 @@ class BazelAPI(
         fg <& proc.stderr.through(pipe).evalMap(logger.printStdErr).compile.drain
       }
   }
+
+  def query(q: Query, extra: String*): IO[build.QueryResult] =
+    runAndParse[build.QueryResult]("query", q.render :: "--output=proto" :: extra.toList: _*)
 
   def aquery(q: AnyQuery, extra: String*): IO[analysis_v2.ActionGraphContainer] = {
     val fa = runAndParse[analysis_v2.ActionGraphContainer]("aquery", (q.render :: "--output=proto" :: extra.toList ++ aqueryArgs)*)

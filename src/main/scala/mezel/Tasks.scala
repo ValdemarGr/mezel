@@ -41,6 +41,31 @@ class Tasks(
   def buildTargetCache: IO[BuildTargetCache] =
     buildTargetFiles.map(xs => xs.map(x => x.label -> x)).map(BuildTargetCache(_)) // .flatMap(fromTargets)
 
+  def buildTargetRdeps(paths: String*): IO[List[String]] = {
+    import dsl._
+    val lst = paths.toList
+    api.query(rdeps("...", set(lst))).map { qr =>
+      val sourceMap = qr.target.mapFilter(_.sourceFile).mapFilter(x => x.location.tupleRight(x)).toMap
+      val ruleMap = qr.target
+        .mapFilter(_.rule)
+        .flatMap(x => x.ruleInput.tupleRight(x))
+        .groupMap { case (k, _) => k } { case (_, v) => v }
+
+      lst.flatMap { p =>
+        sourceMap.get(p.toString).toList.flatMap{ s =>
+          val st = s.name
+          def findScalaRules(label: String): List[String] =
+            ruleMap.get(label).toList.flatMap { rules =>
+              rules.find(_.ruleClass.contains("scala")).map(_.name).map(List(_)).getOrElse {
+                rules.map(_.name).flatMap(findScalaRules)
+              }
+            }
+          findScalaRules(st)
+        }
+      }
+    }
+  }
+
   def buildConfig(targets: String*): IO[Unit] = trace.trace("buildConfig") {
     api
       .runBuild(
@@ -59,7 +84,7 @@ class Tasks(
 
   def buildTargetFiles: IO[List[BuildTargetFiles]] = trace.trace("buildTargetFiles") {
     import dsl._
-    buildAll() *>
+    // buildAll() *>
       buildConfig("...") *>
       api
         .aquery(mnemonic("MezelAspect")(deps("...")), "--aspects", aspect)

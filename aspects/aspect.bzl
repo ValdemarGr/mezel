@@ -56,7 +56,7 @@ def _mezel_aspect(target, ctx):
   ]
   direct_dep_labels = [x.label for x in dep_outputs]
 
-  transitive_labels = depset([target.label], transitive = [x.transitive_labels for x in dep_outputs])
+  # transitive_labels = depset([target.label], transitive = [x.transitive_labels for x in dep_outputs])
   # IDK why, but ignoring generated jars breaks the build, even though we are careful whith what we ignore.?
   # maybe it is because metals doesn't respect transitive projects? I don't know.
   ignore = [] #transitive_labels.to_list()
@@ -119,9 +119,11 @@ def _mezel_aspect(target, ctx):
     inputs = [scalac_options_file, sources_file, dependency_sources_file, build_target_file]
   )
 
+  # extra = "" if ctx.label.workspace_root.endswith("/") else "/"
   files = struct(
     label = target.label,
-    transitive_labels = transitive_labels,
+    # target_dir = ctx.label.workspace_root + extra + ctx.label.package
+    # transitive_labels = transitive_labels,
   )
 
   transitive_output_files = [
