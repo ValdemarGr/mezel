@@ -51,6 +51,15 @@ object GraphWatcher {
   //   - schema for jar code generator, must re-import
   //   - filegroup as data, do nothing
   //   - other?
+  //
+
+  // BUILD.bazel add/remove -> diff this build target labels import with previous and reimport
+  // BUILD.bazel modify -> is file defined at a known build taget label? if so, reimport
+  // Disregard *.scala modifications, metals will handle it
+  // For everything else:
+  // bazel query "rdeps(//..., src/main/scala/my_project/my_file.something)" --output proto
+  // This can be batched via:
+  // "rdeps(//..., set(src/main/scala/my_project/my_file.something, src/main/scala/my_project/my_file2.something))"
 
   // def watchAll(root: Path) = {
   //   // IO.ref()
