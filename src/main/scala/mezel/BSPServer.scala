@@ -265,27 +265,35 @@ class BspServerOps(
         if s.workspaceRoot.isDefined then IO.raiseError(new Exception("already initialized"))
         else state.update(_.copy(workspaceRoot = Some(msg.rootUri)))
       } >> {
-      val gw = GraphWatcher(msg.rootUri, mkTasks(msg.rootUri), trace.nested("watcher"))
+      val gw = GraphWatcher( /*msg.rootUri, mkTasks(msg.rootUri), */ trace.nested("watcher"))
       // TODO find roots automatically
-      gw.startWatcher(uriToPath(msg.rootUri) / "src")
-        .flatMap { eventStream =>
-          sup.supervise {
-            eventStream
-              .evalMap { wr =>
-                val combined = (
-                  wr.modified.toList.tupleRight(BuildTargetEventKind.Changed) ++
-                    wr.deleted.toList.tupleRight(BuildTargetEventKind.Deleted) ++
-                    wr.created.toList.tupleRight(BuildTargetEventKind.Created)
-                ).map { case (label, kind) => BuildTargetEvent(buildIdent(label), kind) }
+      sup
+        .supervise {
+          gw.startWatcher(uriToPath(msg.rootUri) / "src") >>
+            sendNotification(
+              "buildTarget/didChange",
+              DidChangeBuildTarget(
+                List(
+                  BuildTargetEvent(BuildTargetIdentifier(msg.rootUri), BuildTargetEventKind.Changed)
+                )
+              )
+            )
+          // eventStream
+          //   .evalMap { wr =>
+          //     val combined = (
+          //       wr.modified.toList.tupleRight(BuildTargetEventKind.Changed) ++
+          //         wr.deleted.toList.tupleRight(BuildTargetEventKind.Deleted) ++
+          //         wr.created.toList.tupleRight(BuildTargetEventKind.Created)
+          //     ).map { case (label, kind) => BuildTargetEvent(buildIdent(label), kind) }
 
-                logger.logInfo(s"producing ${combined} change events") >>
-                  combined.toNel.traverse_ { events =>
-                    sendNotification("buildTarget/didChange", DidChangeBuildTarget(events.toList))
-                  }
-              }
-              .compile
-              .drain
-          }
+          //     logger.logInfo(s"producing ${combined} change events") >>
+          //       combined.toNel.traverse_ { events =>
+          //         sendNotification("buildTarget/didChange", DidChangeBuildTarget(events.toList))
+          //       }
+          //   }
+          //   .compile
+          //   .drain
+          // }
         }
         .as {
           Some {

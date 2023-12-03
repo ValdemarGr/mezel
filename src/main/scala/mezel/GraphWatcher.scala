@@ -8,8 +8,8 @@ import fs2._
 import cats._
 
 class GraphWatcher(
-    root: SafeUri,
-    tasks: Tasks,
+    // root: SafeUri,
+    // tasks: Tasks,
     trace: Trace
 ) {
   enum EvType {
@@ -52,117 +52,137 @@ class GraphWatcher(
       case (EvType.Deleted, p)                   => Files[IO].exists(p).map(!_)
     }
 
-  final case class WatchResult(
-      modified: Chunk[String],
-      deleted: Set[String],
-      created: Set[String]
-  )
-  object WatchResult {
-    given Monoid[WatchResult] = new Monoid[WatchResult] {
-      def empty: WatchResult = WatchResult(Chunk.empty, Set.empty, Set.empty)
-      def combine(x: WatchResult, y: WatchResult): WatchResult =
-        WatchResult(
-          x.modified ++ y.modified,
-          x.deleted ++ y.deleted,
-          x.created ++ y.created
-        )
-    }
-  }
-  def computeEvents(
-      prevLabels: Set[String],
-      labels: Set[String],
-      events: Chunk[(EvType, Path)]
-  ): IO[WatchResult] = {
-    val r = uriToPath(root)
-    // This handles creation/deletion of BUILD files
-    val createdLabels = labels -- prevLabels
-    val deletedLabels = prevLabels -- labels
-
-    // We can only find changes in the workspace (since symlink (execroot) changes are really hard)
-    // Thus we can infer any BUILD location by just using the label
-    val localPaths = labels.toList.mapFilter { x =>
-      val tl = 
-        if (x.startsWith("@//")) Some(x.drop(3))
-        else if (x.startsWith("//")) Some(x.drop(2))
-        else None
-
-      tl.map(y => r / Path(y.takeWhile(_ =!= ':')) -> x)
-    }.toMap
-
-    sealed trait WatchTask
-    object WatchTask {
-      final case class BuildModification(label: String) extends WatchTask
-      final case class FileModification(p: Path) extends WatchTask
-    }
-
-    val ys = events.mapFilter { case (et, p) =>
+  def buildDidChange(events: Chunk[(EvType, Path)]): Boolean =
+    events.exists { case (et, p) =>
       val fn = p.fileName.toString
-      if (fn === "BUILD.bazel" || fn === "BUILD") {
-        et match {
-          case EvType.Modified => p.parent.flatMap(localPaths.get).map(WatchTask.BuildModification(_))
-          case _               => None
-        }
-      } else if (fn.endsWith(".scala") || fn.endsWith(".sc")) {
-        et match {
-          case EvType.Modified => None
-          case _               => Some(WatchTask.FileModification(p))
-        }
-      } else Some(WatchTask.FileModification(p))
+      // If it's a modified scala file, we can just skip it, everything else causes a build change
+      !((fn.endsWith(".scala") || fn.endsWith(".sc")) && et == EvType.Modified)
     }
 
-    val fileMods: IO[List[String]] = ys
-      .collect { case WatchTask.FileModification(p) => p }
-      .toNel
-      .toList
-      .flatTraverse(xs => tasks.buildTargetRdeps(xs.map(p => r.relativize(p).toString).toList: _*))
+  // metals just needs to know if it needs to reimport
+  // final case class WatchResult(
+  //     modified: Chunk[String],
+  //     deleted: Set[String],
+  //     created: Set[String]
+  // )
+  // object WatchResult {
+  //   given Monoid[WatchResult] = new Monoid[WatchResult] {
+  //     def empty: WatchResult = WatchResult(Chunk.empty, Set.empty, Set.empty)
+  //     def combine(x: WatchResult, y: WatchResult): WatchResult =
+  //       WatchResult(
+  //         x.modified ++ y.modified,
+  //         x.deleted ++ y.deleted,
+  //         x.created ++ y.created
+  //       )
+  //   }
+  // }
+  // def computeEvents(
+  //     prevLabels: Set[String],
+  //     labels: Set[String],
+  //     events: Chunk[(EvType, Path)]
+  // ): IO[WatchResult] = {
+  //   val r = uriToPath(root)
+  //   // This handles creation/deletion of BUILD files
+  //   val createdLabels = labels -- prevLabels
+  //   val deletedLabels = prevLabels -- labels
 
-    val buildMods: Chunk[String] = ys.collect { case WatchTask.BuildModification(p) => p }
+  //   // We can only find changes in the workspace (since symlink (execroot) changes are really hard)
+  //   // Thus we can infer any BUILD location by just using the label
+  //   val localPaths = labels.toList.mapFilter { x =>
+  //     val tl =
+  //       if (x.startsWith("@//")) Some(x.drop(3))
+  //       else if (x.startsWith("//")) Some(x.drop(2))
+  //       else None
 
-    fileMods.map { xs =>
-      WatchResult(
-        (Chunk.from(xs) ++ buildMods).hashDistinct,
-        deletedLabels,
-        createdLabels
-      )
-    }
-  }
+  //     tl.map(y => r / Path(y.takeWhile(_ =!= ':')) -> x)
+  //   }.toMap
+
+  //   sealed trait WatchTask
+  //   object WatchTask {
+  //     final case class BuildModification(label: String) extends WatchTask
+  //     final case class FileModification(p: Path) extends WatchTask
+  //   }
+
+  //   val ys = events.mapFilter { case (et, p) =>
+  //     val fn = p.fileName.toString
+  //     if (fn === "BUILD.bazel" || fn === "BUILD") {
+  //       et match {
+  //         case EvType.Modified => p.parent.flatMap(localPaths.get).map(WatchTask.BuildModification(_))
+  //         case _               => None
+  //       }
+  //     } else if (fn.endsWith(".scala") || fn.endsWith(".sc")) {
+  //       et match {
+  //         case EvType.Modified => None
+  //         case _               => Some(WatchTask.FileModification(p))
+  //       }
+  //     } else Some(WatchTask.FileModification(p))
+  //   }
+
+  //   val fileMods: IO[List[String]] = ys
+  //     .collect { case WatchTask.FileModification(p) => p }
+  //     .toNel
+  //     .toList
+  //     .flatTraverse(xs => tasks.buildTargetRdeps(xs.map(p => r.relativize(p).toString).toList: _*))
+
+  //   val buildMods: Chunk[String] = ys.collect { case WatchTask.BuildModification(p) => p }
+
+  //   fileMods.map { xs =>
+  //     WatchResult(
+  //       (Chunk.from(xs) ++ buildMods).hashDistinct,
+  //       deletedLabels,
+  //       createdLabels
+  //     )
+  //   }
+  // }
 
   def startWatcher(
       root: Path
       // init: BuildTargetCache
-  ): IO[Stream[IO, WatchResult]] = {
-    val genLabels = trace.trace("genLabels") {
-      tasks.buildTargetCache.map(_.buildTargets.map { case (k, _) => k }.toSet)
-    }
-    genLabels.map { init =>
-      Stream.eval(trace.logger.logInfo(s"Starting watcher for ${root}")) >>
-        Files[IO]
-          .watch(root)
-          .groupWithin(1024, 150.millis)
-          .evalMapAccumulate(init) { case (prev, events) =>
-            trace.logger.logInfo(s"${events.size} events unconsed ${events}") >>
-              genLabels
-                .flatMap { nextLabels =>
-                  val interesting = eliminateRedundant(extractEvents(events))
+  ): IO[Unit] = {
+    // val genLabels = trace.trace("genLabels") {
+    //   tasks.buildTargetCache.map(_.buildTargets.map { case (k, _) => k }.toSet)
+    // }
+    // genLabels.map { init =>
+    trace.logger.logInfo(s"Starting watcher for ${root}") >>
+      Files[IO]
+        .watch(root)
+        .groupWithin(1024, 150.millis)
+        .evalMap { events =>
+          val interesting = eliminateRedundant(extractEvents(events))
+          val bdc = buildDidChange(interesting)
+          trace.logger.logInfo(s"${events.size} events unconsed") *>
+            trace.logger.logInfo(s"eliminated ${events.size - interesting.size} uninteresting events") *>
+            trace.logger.logInfo(s"did build change form looking at the interesting events? ${bdc}").as {
+              bdc
+            }
+        }
+        .exists(identity)
+        .compile
+        .drain
+    // .evalMapAccumulate(init) { case (prev, events) =>
+    //   trace.logger.logInfo(s"${events.size} events unconsed ${events}") >>
+    //     genLabels
+    //       .flatMap { nextLabels =>
+    //         val interesting = eliminateRedundant(extractEvents(events))
 
-                  def run(events: Chunk[(EvType, Path)]) =
-                    trace.logger.logInfo(s"handling ${events.size} events after elimination ${events}") >>
-                      computeEvents(prev, nextLabels, events) <*
-                      trace.logger.logInfo(s"successfully handled ${events.size} events")
+    //         def run(events: Chunk[(EvType, Path)]) =
+    //           trace.logger.logInfo(s"handling ${events.size} events after elimination ${events}") >>
+    //             computeEvents(prev, nextLabels, events) <*
+    //             trace.logger.logInfo(s"successfully handled ${events.size} events")
 
-                  run(interesting)
-                    .handleErrorWith { e =>
-                      trace.logger.logError(s"Error, recovering by handling events one at the time: ${e}") >>
-                        interesting.foldMapA { x =>
-                          run(Chunk(x)).handleErrorWith { e =>
-                            trace.logger.logError(s"Error, failed to handle event ${x}: ${e}").as(Monoid[WatchResult].empty)
-                          }
-                        }
-                    }
-                    .tupleLeft(nextLabels)
-                }
-          }
-          .map { case (_, wr) => wr }
-    }
+    //         run(interesting)
+    //           .handleErrorWith { e =>
+    //             trace.logger.logError(s"Error, recovering by handling events one at the time: ${e}") >>
+    //               interesting.foldMapA { x =>
+    //                 run(Chunk(x)).handleErrorWith { e =>
+    //                   trace.logger.logError(s"Error, failed to handle event ${x}: ${e}").as(Monoid[WatchResult].empty)
+    //                 }
+    //               }
+    //           }
+    //           .tupleLeft(nextLabels)
+    //       }
+    // }
+    // .map { case (_, wr) => wr }
+    // }
   }
 }

@@ -41,7 +41,7 @@ object Trace {
           fa ++ Stream.exec(msg(name)(start))
         }
 
-      def nested(next: String): Trace = in(s"${context} -> ${next}", logger)
+      def nested(next: String): Trace = in(s"${context} -> ${next}", logger0)
 
       def logger: Logger = new Logger {
         override def logError(msg: String): IO[Unit] = 
