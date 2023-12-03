@@ -3,7 +3,8 @@ Mezel is a Scala [BSP](https://build-server-protocol.github.io/) implementation 
 Mezel acts as a communication layer between Bazel and Scala BSP consumers such as [Metals](https://scalameta.org/metals/).
 
 ## Getting started
-Make sure that you are using version `f9381414068466b9c74ff7681d204e1eb19c7f80` of the bazel scala rules.
+### Scala rules setup
+Make sure that you are using version `f9381414068466b9c74ff7681d204e1eb19c7f80` or newer of the bazel scala rules.
 Failing to do so will cause issues with generation of diagnostics.
 ```starlark
 rules_scala_version = "f9381414068466b9c74ff7681d204e1eb19c7f80"  # update this as needed
@@ -37,7 +38,33 @@ toolchain(
     toolchain_type = "@io_bazel_rules_scala//scala:toolchain_type"
 )
 ```
+Furthermore I suggest omitting the fatal warnings flag when you are editing your code, since downstream targets won't build if their dependencies don't compile.
+```starlark
+# flags.bzl
+_flags = [
+  "-encoding",
+  "UTF-8",
+  "-Wconf:cat=other-implicit-type:s",
+  "-Wdead-code",
+  "-Wextra-implicit",
+  "-Wunused:explicits"
+  # and so on...
+]
+flags = _flags + select({
+  "//my_config:no_fatal_warnings": [],
+  "//conditions:default": ["-Xfatal-warnings"]
+})
 
+# myconfig/BUILD.bazel
+config_setting(
+  name = "no_fatal_warnings",
+  define_values = {
+    "no_fatal_warnings": "true"
+  }
+)
+```
+
+### Mezel setup
 Mezel needs an aspect to work, so add the following to your `WORKSPACE` file to get it into scope:
 ```starlark
 mezel_version = "6129b24dc78bb1c04d02dcb93bcb15114a9c479b"  # update this as needed
@@ -65,3 +92,25 @@ bazel run @mezel//rules:gen_bsp_config /path/to/workspace
 ```
 
 And that's it. Start your editor and select `Mezel` as your BSP server.
+### Configuration
+I suggest checking your bsp file into VCS `.bsp/mezel.json` since it'll likely contain custom flags.
+The path to the json binary should be stable for every user since bazel will pull it in.
+
+If you want to supply custom flags to Mezel, you can do so by modifying the `mezel.json` file.
+To see what flags are available, you can run the binary with the `--help` flag run:
+```bash
+# cat .bsp/mezel.json
+# {"argv":["java","-jar","bazel-out/k8-fastbuild/bin/external/mezel/rules/mezel.jar"],"bspVersion":"2.0.0","languages":["scala"],"name":"Mezel","version":"1.0.0"}
+java -jar bazel-out/k8-fastbuild/bin/external/mezel/rules/mezel.jar --help
+```
+
+For instance, using a custom toolchain and set of configuration options for local development (semanticdb + diagnostics + no fatal warnings):
+```json
+{"argv":[
+  "java", "-jar", "bazel-out/k8-fastbuild/bin/external/mezel/rules/mezel.jar",
+  "--build-arg", "--extra_toolchains=//toolchain:lsp",
+  "--build-arg", "--define=no_fatal_warnings=true",
+  "--aquery-arg", "--extra_toolchains=//toolchain:lsp",
+  "--aquery-arg", "--define=no_fatal_warnings=true"
+],"bspVersion":"2.0.0","languages":["scala"],"name":"Mezel","version":"1.0.0"}
+```
