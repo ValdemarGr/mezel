@@ -121,7 +121,9 @@ object Main
                                 case "buildTarget/compile" =>
                                   expect[CompileParams].flatMap(p => ops.compile(p.targets.map(_.uri)))
                                 case "build/exit" | "build/shutdown" => Exit.raise(())
-                                case m                               => IO.raiseError(new RuntimeException(s"Unknown method: $m"))
+                                // I got this while testing?
+                                case "$/cancelRequest" => IO.pure(None)
+                                case m                 => IO.raiseError(new RuntimeException(s"Unknown method: $m"))
                               }
                             }
                           }

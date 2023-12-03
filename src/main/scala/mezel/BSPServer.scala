@@ -277,9 +277,11 @@ class BspServerOps(
                     wr.deleted.toList.tupleRight(BuildTargetEventKind.Deleted) ++
                     wr.created.toList.tupleRight(BuildTargetEventKind.Created)
                 ).map { case (label, kind) => BuildTargetEvent(buildIdent(label), kind) }
-                combined.toNel.traverse_ { events =>
-                  sendNotification("buildTarget/didChange", DidChangeBuildTarget(events.toList))
-                }
+
+                logger.logInfo(s"producing ${combined} change events") >>
+                  combined.toNel.traverse_ { events =>
+                    sendNotification("buildTarget/didChange", DidChangeBuildTarget(events.toList))
+                  }
               }
               .compile
               .drain

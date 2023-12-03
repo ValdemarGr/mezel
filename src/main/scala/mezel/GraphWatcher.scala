@@ -81,8 +81,12 @@ class GraphWatcher(
     // We can only find changes in the workspace (since symlink (execroot) changes are really hard)
     // Thus we can infer any BUILD location by just using the label
     val localPaths = labels.toList.mapFilter { x =>
-      if (x.startsWith("@//")) Some(Path(x.drop(3).takeWhile(_ =!= ':')) -> x)
-      else None
+      val tl = 
+        if (x.startsWith("@//")) Some(x.drop(3))
+        else if (x.startsWith("//")) Some(x.drop(2))
+        else None
+
+      tl.map(y => r / Path(y.takeWhile(_ =!= ':')) -> x)
     }.toMap
 
     sealed trait WatchTask
@@ -134,7 +138,7 @@ class GraphWatcher(
       Stream.eval(trace.logger.logInfo(s"Starting watcher for ${root}")) >>
         Files[IO]
           .watch(root)
-          .groupWithin(1024, 50.millis)
+          .groupWithin(1024, 150.millis)
           .evalMapAccumulate(init) { case (prev, events) =>
             trace.logger.logInfo(s"${events.size} events unconsed ${events}") >>
               genLabels
