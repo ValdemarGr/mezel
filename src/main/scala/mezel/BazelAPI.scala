@@ -34,12 +34,7 @@ class BazelAPI(
 
   def run(pb: ProcessBuilder): Resource[IO, Process[IO]] =
     trace.traceResource(s"bazel command ${(pb.command :: pb.args).map(x => s"'$x'").mkString(" ")}") {
-      pb.spawn[IO].flatTap { p =>
-        Resource.onFinalize(p.exitValue.flatMap {
-          case 0 => IO.unit
-          case n => IO.raiseError(new Exception(s"Bazel command failed with exit code $n"))
-        })
-      }
+      pb.spawn[IO]
     }
 
   def builder(cmd: String, printLogs: Boolean, args: String*) = {
@@ -54,7 +49,10 @@ class BazelAPI(
           .toInputStreamResource(proc.stdout)
           .use(is => IO.interruptibleMany(ev.parseFrom(is)))
 
-        fg <& proc.stderr.through(pipe).evalMap(logger.printStdErr).compile.drain
+        fg <& proc.stderr.through(pipe).evalMap(logger.printStdErr).compile.drain <* proc.exitValue.flatMap {
+          case 0 => IO.unit
+          case n => IO.raiseError(new Exception(s"Bazel command failed with exit code $n"))
+        }
       }
   }
 
