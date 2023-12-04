@@ -28,7 +28,7 @@ class BazelAPI(
     aqueryArgs: List[String],
     logger: Logger,
     trace: Trace,
-    outputBase: Path
+    outputBase: Option[Path]
 ) {
   def pipe: Pipe[IO, Byte, String] = _.through(fs2.text.utf8.decode).through(fs2.text.lines)
 
@@ -38,9 +38,10 @@ class BazelAPI(
     }
 
   def builder(cmd: String, printLogs: Boolean, args: String*) = {
+    val ob = outputBase.map(x => s"--output_base=${x.toString}").toList
     ProcessBuilder(
       "bazel",
-      s"--output_base=${outputBase}" :: cmd :: List("--noshow_loading_progress", "--noshow_progress").filter(_ => !printLogs) ++ args.toList
+      ob ++ (cmd :: List("--noshow_loading_progress", "--noshow_progress").filter(_ => !printLogs)) ++ args.toList
     )
       .withWorkingDirectory(rootDir)
   }
@@ -64,13 +65,14 @@ class BazelAPI(
       p.stdout
         .through(pipe)
         .evalMap { line =>
-          line.split(" ").toList match {
-            case k :: v :: Nil => IO.pure(k -> v)
+          line.split(": ").toList match {
+            case k :: v :: Nil => IO.pure(Some(k -> v))
             case _ =>
               val msg = s"Unexpected output from bazel info: $line"
-              logger.logError(msg) *> IO.raiseError(new Exception(msg))
+              logger.logWarn(msg).as(None)
           }
         }
+        .unNone
         .concurrently(p.stderr.through(pipe).evalMap(logger.printStdErr))
         .compile
         .to(Map)

@@ -37,7 +37,7 @@ class Tasks(
 ) {
   val aspect = "@mezel//aspects:aspect.bzl%mezel_aspect"
 
-  def api = BazelAPI(uriToPath(root), buildArgs, aqueryArgs, logger, trace, outputBase)
+  def api = BazelAPI(uriToPath(root), buildArgs, aqueryArgs, logger, trace, Some(outputBase))
 
   def buildTargetCache: IO[BuildTargetCache] =
     buildTargetFiles.map(xs => xs.map(x => x.label -> x)).map(BuildTargetCache(_)) // .flatMap(fromTargets)
@@ -82,8 +82,6 @@ class Tasks(
   def buildAll(extraFlags: String*): IO[Unit] = trace.trace("buildAll") {
     api.runBuild(("//..." :: "--keep_going" :: extraFlags.toList)*).void
   }
-
-  def info = api
 
   def buildTargetFiles: IO[List[BuildTargetFiles]] = trace.trace("buildTargetFiles") {
     import dsl._
