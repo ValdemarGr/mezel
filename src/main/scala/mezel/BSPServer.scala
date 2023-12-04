@@ -88,6 +88,8 @@ final case class BspState(
     prevDiagnostics: Map[BuildTargetIdentifier, List[TextDocumentIdentifier]] = Map.empty
 )
 
+def tmpRoot = IO.delay(System.getProperty("java.io.tmpdir")).map(Path(_))
+
 def pathToUri(p: Path): SafeUri =
   SafeUri(p.toNioPath.toUri().toString())
 
@@ -245,8 +247,6 @@ class BspServerOps(
 
   def derivedExecRoot: IO[Path] =
     derivedEnv.map(_.apply("execution_root")).map(Path(_))
-
-  def tmpRoot = IO.delay(System.getProperty("java.io.tmpdir")).map(Path(_))
 
   def cacheFolder: IO[Path] =
     workspaceRoot.flatMap { wsr =>
