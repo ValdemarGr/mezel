@@ -97,7 +97,7 @@ I suggest checking your bsp file into VCS `.bsp/mezel.json` since it'll likely c
 The path to the java binary should be stable for every user since it will be relative to your workspace root.
 
 If you want to supply custom flags to Mezel, you can do so by modifying the `mezel.json` file.
-To see what flags are available, you can run the binary with the `--help` flag run:
+To see what flags are available, you can run the binary with the `--help` flag:
 ```bash
 # cat .bsp/mezel.json
 # {"argv":["java","-jar","bazel-out/k8-fastbuild/bin/external/mezel/rules/mezel.jar"],"bspVersion":"2.0.0","languages":["scala"],"name":"Mezel","version":"1.0.0"}
