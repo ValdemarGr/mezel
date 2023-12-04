@@ -168,7 +168,6 @@ class BspServerOps(
     requestDone: Deferred[IO, Unit],
     sup: Supervisor[IO],
     output: Channel[IO, Json],
-    cache: Path,
     buildArgs: List[String],
     aqueryArgs: List[String],
     logger: Logger,
@@ -228,16 +227,20 @@ class BspServerOps(
   def workspaceRoot: IO[SafeUri] =
     get(_.workspaceRoot)(_ => BspResponseError.NotInitialized)
 
+  def tmpRoot = IO.delay(System.getProperty("java.io.tmpdir")).map(Path(_))
+
+  def cacheFolder: IO[Path] =
+    workspaceRoot.flatMap { wsr =>
+      tmpRoot.map(_ / ("mezel-cache-" + uriToPath(wsr).fileName.toString))
+    }
+
   def sendNotification[A: Encoder](method: String, params: A): IO[Unit] =
     output.send(Notification("2.0", method, Some(params.asJson)).asJson).void
 
-  def semanticdbCachePath(targetroot: String): Path =
-    cache / targetroot
-
-  def cacheSemanticdbPath(root: SafeUri, targetroot: String): IO[Unit] = {
+  def cacheSemanticdbPath(root: SafeUri, cache: Path, targetroot: String): IO[Unit] = {
     val r = uriToPath(root)
     val actualDir = r / Path(targetroot)
-    val cacheDir = semanticdbCachePath(targetroot)
+    val cacheDir = cache / targetroot
 
     val ls = Files[IO].walk(actualDir).evalFilterNot(Files[IO].isDirectory)
     // Files[IO].list(actualDir, "*.semanticdb")
@@ -255,9 +258,14 @@ class BspServerOps(
         .drain
   }
 
-  def mkTasks(rootUri: SafeUri) = Tasks(rootUri, buildArgs, aqueryArgs, logger, trace)
+  def mkTasks(rootUri: SafeUri) = {
+    tmpRoot.map { tr =>
+      val ob = tr / s"mezel-bazel-output-base-${uriToPath(rootUri).fileName.toString}"
+      Tasks(rootUri, buildArgs, aqueryArgs, logger, trace, ob)
+    }
+  }
 
-  def tasks = workspaceRoot.map(mkTasks)
+  def tasks = workspaceRoot.flatMap(mkTasks)
 
   def initalize(msg: InitializeBuildParams): IO[Option[Json]] =
     state.get
@@ -346,81 +354,83 @@ class BspServerOps(
     workspaceRoot.flatMap { wsr =>
       tasks.flatMap { t =>
         prevDiagnostics.flatMap { prevDiagnostics =>
-          t.diagnosticsFiles.map(_.toMap).flatMap { diagnosticsFiles =>
-            Files[IO].tempFile
-              .use { tmp =>
-                val writeFiles = Stream.eval(readId).flatMap { xs =>
-                  Stream.eval(readScalacOptions).flatMap { scalacOptions =>
-                    val scalacOptionsMap = scalacOptions.toMap
-                    val bspLabels = xs.map { case (id, _) => id }.toSet
+          cacheFolder.flatMap { cacheDir =>
+            t.diagnosticsFiles.map(_.toMap).flatMap { diagnosticsFiles =>
+              Files[IO].tempFile
+                .use { tmp =>
+                  val writeFiles = Stream.eval(readId).flatMap { xs =>
+                    Stream.eval(readScalacOptions).flatMap { scalacOptions =>
+                      val scalacOptionsMap = scalacOptions.toMap
+                      val bspLabels = xs.map { case (id, _) => id }.toSet
 
-                    val labelStream =
-                      trace
-                        .traceStream("parse bazel BEP") {
-                          parseBEP(tmp)
-                        }
-                        .mapFilter { x =>
-                          for {
-                            comp <- x.payload.completed
-                            id <- x.id
-                            targetCompletedId <- id.id.targetCompleted
-                            label <- Some(targetCompletedId.label).filter(bspLabels.contains)
-                          } yield (label, comp.success)
-                        }
-
-                    labelStream.parEvalMapUnorderedUnbounded { case (label, success) =>
-                      val readDiagnostics: IO[diagnostics.TargetDiagnostics] =
-                        Files[IO]
-                          .readAll(diagnosticsFiles(label))
-                          .through(fs2.io.toInputStream[IO])
-                          .evalMap(is => IO.blocking(diagnostics.TargetDiagnostics.parseFrom(is)))
-                          .compile
-                          .lastOrError
-
-                      // if there are no diagnostics for a target, clear the diagnostics
-                      // if there are diagnostics for a target, publish them
-                      val publishDiag: IO[Unit] = readDiagnostics.flatMap { td =>
-                        val bti = buildIdent(label)
-                        val xs = convertDiagnostic(wsr, bti, td)
-                        val prevHere = prevDiagnostics.get(bti).toList.flatten
-                        val toClear = prevHere.toSet -- xs.map(_.textDocument)
-
-                        xs.traverse(x => publishDiagnostics(x) *> cacheDiagnostic(bti, x.textDocument)) *>
-                          toClear.toList
-                            .map(PublishDiagnosticsParams(_, bti, None, Nil, true))
-                            .traverse_(publishDiagnostics)
-                      }
-
-                      // if success then there are semanticdb files to publish
-                      // if !success then use cached semanticdb files
-                      val writeSemanticDB =
-                        if (success) {
-                          scalacOptionsMap.get(label).traverse_ { sco =>
-                            cacheSemanticdbPath(wsr, sco.targetroot)
+                      val labelStream =
+                        trace
+                          .traceStream("parse bazel BEP") {
+                            parseBEP(tmp)
                           }
-                        } else IO.unit
+                          .mapFilter { x =>
+                            for {
+                              comp <- x.payload.completed
+                              id <- x.id
+                              targetCompletedId <- id.id.targetCompleted
+                              label <- Some(targetCompletedId.label).filter(bspLabels.contains)
+                            } yield (label, comp.success)
+                          }
 
-                      publishDiag *> writeSemanticDB
+                      labelStream.parEvalMapUnorderedUnbounded { case (label, success) =>
+                        val readDiagnostics: IO[diagnostics.TargetDiagnostics] =
+                          Files[IO]
+                            .readAll(diagnosticsFiles(label))
+                            .through(fs2.io.toInputStream[IO])
+                            .evalMap(is => IO.blocking(diagnostics.TargetDiagnostics.parseFrom(is)))
+                            .compile
+                            .lastOrError
+
+                        // if there are no diagnostics for a target, clear the diagnostics
+                        // if there are diagnostics for a target, publish them
+                        val publishDiag: IO[Unit] = readDiagnostics.flatMap { td =>
+                          val bti = buildIdent(label)
+                          val xs = convertDiagnostic(wsr, bti, td)
+                          val prevHere = prevDiagnostics.get(bti).toList.flatten
+                          val toClear = prevHere.toSet -- xs.map(_.textDocument)
+
+                          xs.traverse(x => publishDiagnostics(x) *> cacheDiagnostic(bti, x.textDocument)) *>
+                            toClear.toList
+                              .map(PublishDiagnosticsParams(_, bti, None, Nil, true))
+                              .traverse_(publishDiagnostics)
+                        }
+
+                        // if success then there are semanticdb files to publish
+                        // if !success then use cached semanticdb files
+                        val writeSemanticDB =
+                          if (success) {
+                            scalacOptionsMap.get(label).traverse_ { sco =>
+                              cacheSemanticdbPath(wsr, cacheDir, sco.targetroot)
+                            }
+                          } else IO.unit
+
+                        publishDiag *> writeSemanticDB
+                      }
                     }
                   }
-                }
 
-                writeFiles
-                  .merge(Stream.eval(t.buildAll(s"--build_event_binary_file=${tmp.absolute.toString()}")))
-                  .compile
-                  .drain
-              }
-              .void
-              .as {
-                Some {
-                  CompileResult(
-                    None,
-                    StatusCode.Ok,
-                    None,
-                    None
-                  ).asJson
+                  writeFiles
+                    .merge(Stream.eval(t.buildAll(s"--build_event_binary_file=${tmp.absolute.toString()}")))
+                    .compile
+                    .drain
                 }
-              }
+                .void
+                .as {
+                  Some {
+                    CompileResult(
+                      None,
+                      StatusCode.Ok,
+                      None,
+                      None
+                    ).asJson
+                  }
+                }
+            }
           }
         }
       }
@@ -452,76 +462,83 @@ class BspServerOps(
 
   def scalacOptions(targets: List[SafeUri]) =
     workspaceRoot.flatMap { wsr =>
-      readScalacOptions.map { scos =>
-        val r = uriToPath(wsr)
-        val folderName = r.fileName.toString()
-        val execRoot = Path(s"bazel-${folderName}")
-        Some {
-          ScalacOptionsResult {
-            scos.toList.map { case (label, sco) =>
-              val semanticdbDir = semanticdbCachePath(sco.targetroot)
-              ScalacOptionsItem(
-                buildIdent(label),
-                (sco.scalacopts ++ List(
-                  s"-P:semanticdb:targetroot:${semanticdbDir.toString /*cachedSemanticdbPath(sco.targetroot)*/}",
-                  s"-P:semanticdb:sourceroot:${semanticdbDir.toString /*cachedSemanticdbPath(sco.targetroot)*/}",
-                  "-Xplugin-require:semanticdb",
-                  s"-Xplugin:${(r / execRoot / Path(sco.semanticdbPlugin))}"
-                ) ++ sco.plugins.map(x => s"-Xplugin:${r / Path(x)}")).distinct,
-                sco.classpath.map(x => pathFullToUri(wsr, Path(x))),
-                semanticdbDir.absolute.toNioPath.toUri().toString // cachedSemanticdbPath(sco.targetroot).absolute.toString()
-              )
-            }
-          }.asJson
+      readScalacOptions.flatMap { scos =>
+        cacheFolder.map { cacheDir =>
+          val r = uriToPath(wsr)
+          val folderName = r.fileName.toString()
+          val execRoot = Path(s"bazel-${folderName}")
+          Some {
+            ScalacOptionsResult {
+              scos.toList.map { case (label, sco) =>
+                val semanticdbDir = cacheDir / sco.targetroot
+                ScalacOptionsItem(
+                  buildIdent(label),
+                  (sco.scalacopts ++ List(
+                    s"-P:semanticdb:targetroot:${semanticdbDir.toString /*cachedSemanticdbPath(sco.targetroot)*/}",
+                    s"-P:semanticdb:sourceroot:${semanticdbDir.toString /*cachedSemanticdbPath(sco.targetroot)*/}",
+                    "-Xplugin-require:semanticdb",
+                    s"-Xplugin:${(r / execRoot / Path(sco.semanticdbPlugin))}"
+                  ) ++ sco.plugins.map(x => s"-Xplugin:${r / Path(x)}")).distinct,
+                  sco.classpath.map(x => pathFullToUri(wsr, Path(x))),
+                  semanticdbDir.absolute.toNioPath.toUri().toString // cachedSemanticdbPath(sco.targetroot).absolute.toString()
+                )
+              }
+            }.asJson
+          }
         }
       }
     }
 
+  // only fetch first time
   def buildTargets: IO[Option[Json]] =
-    workspaceRoot.flatMap { wsr =>
-      tasks.flatMap { t =>
-        val r = uriToPath(wsr)
-        val folderName = r.fileName.toString()
-        val execRoot = s"bazel-${folderName}"
-        t.buildTargetCache.flatMap(btc => state.update(_.copy(buildTargetCache = Some(btc)))) >>
-          readBuildTargets.map { bts =>
-            val targets = bts.toList.map { case (label, bt) =>
-              BuildTarget(
-                id = buildIdent(label),
-                displayName = Some(label),
-                baseDirectory = Some(pathFullToUri(wsr, Path(bt.directory))),
-                tags = List("library"),
-                languageIds = List("scala"),
-                dependencies = bt.deps.map(buildIdent),
-                capabilities = BuildTargetCapabilities(
-                  canCompile = Some(true),
-                  canTest = Some(false),
-                  canRun = Some(false),
-                  canDebug = Some(false)
-                ),
-                dataKind = Some("scala"),
-                data = Some {
-                  ScalaBuildTarget(
-                    scalaOrganization = "org.scala-lang",
-                    scalaVersion = bt.compilerVersion.toVersion,
-                    scalaBinaryVersion = s"${bt.compilerVersion.major}.${bt.compilerVersion.minor}",
-                    platform = 1,
-                    jars = bt.scalaCompilerClasspath.map(Path(_)).map(pathFullToUri(wsr, _)),
-                    jvmBuildTarget = Some {
-                      JvmBuildTarget(
-                        javaHome = Some(pathFullToUri(wsr, Path(execRoot) / Path(bt.javaHome))),
-                        javaVersion = None
+    state.get.map(_.buildTargetCache).flatMap {
+      case Some(_) => IO.pure(None)
+      case None =>
+        workspaceRoot.flatMap { wsr =>
+          tasks.flatMap { t =>
+            val r = uriToPath(wsr)
+            val folderName = r.fileName.toString()
+            val execRoot = s"bazel-${folderName}"
+            t.buildTargetCache.flatMap(btc => state.update(_.copy(buildTargetCache = Some(btc)))) >>
+              readBuildTargets.map { bts =>
+                val targets = bts.toList.map { case (label, bt) =>
+                  BuildTarget(
+                    id = buildIdent(label),
+                    displayName = Some(label),
+                    baseDirectory = Some(pathFullToUri(wsr, Path(bt.directory))),
+                    tags = List("library"),
+                    languageIds = List("scala"),
+                    dependencies = bt.deps.map(buildIdent),
+                    capabilities = BuildTargetCapabilities(
+                      canCompile = Some(true),
+                      canTest = Some(false),
+                      canRun = Some(false),
+                      canDebug = Some(false)
+                    ),
+                    dataKind = Some("scala"),
+                    data = Some {
+                      ScalaBuildTarget(
+                        scalaOrganization = "org.scala-lang",
+                        scalaVersion = bt.compilerVersion.toVersion,
+                        scalaBinaryVersion = s"${bt.compilerVersion.major}.${bt.compilerVersion.minor}",
+                        platform = 1,
+                        jars = bt.scalaCompilerClasspath.map(Path(_)).map(pathFullToUri(wsr, _)),
+                        jvmBuildTarget = Some {
+                          JvmBuildTarget(
+                            javaHome = Some(pathFullToUri(wsr, Path(execRoot) / Path(bt.javaHome))),
+                            javaVersion = None
+                          )
+                        }
                       )
                     }
                   )
                 }
-              )
-            }
 
-            Some {
-              WorkspaceBuildTargetsResult(targets = targets).asJson
-            }
+                Some {
+                  WorkspaceBuildTargetsResult(targets = targets).asJson
+                }
+              }
           }
-      }
+        }
     }
 }

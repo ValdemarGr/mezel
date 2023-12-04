@@ -114,3 +114,9 @@ For instance, using a custom toolchain and set of configuration options for loca
   "--aquery-arg", "--define=no_fatal_warnings=true"
 ],"bspVersion":"2.0.0","languages":["scala"],"name":"Mezel","version":"1.0.0"}
 ```
+
+[A bug](https://github.com/bazelbuild/bazel/issues/10653) with bazel build/aquery causes bazel to consider the convinience symlinks it creates to be considered build targets.
+To get around this, tell bazel to ignore the symlink when running bazel operations:
+```bash
+echo "bazel-$(basename $PWD)" >> .bazelignore
+```

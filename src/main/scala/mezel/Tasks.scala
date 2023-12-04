@@ -32,11 +32,12 @@ class Tasks(
     buildArgs: List[String],
     aqueryArgs: List[String],
     logger: Logger,
-    trace: Trace
+    trace: Trace,
+    outputBase: Path
 ) {
   val aspect = "@mezel//aspects:aspect.bzl%mezel_aspect"
 
-  def api = BazelAPI(uriToPath(root), buildArgs, aqueryArgs, logger, trace)
+  def api = BazelAPI(uriToPath(root), buildArgs, aqueryArgs, logger, trace, outputBase)
 
   def buildTargetCache: IO[BuildTargetCache] =
     buildTargetFiles.map(xs => xs.map(x => x.label -> x)).map(BuildTargetCache(_)) // .flatMap(fromTargets)
@@ -52,7 +53,7 @@ class Tasks(
         .groupMap { case (k, _) => k } { case (_, v) => v }
 
       lst.flatMap { p =>
-        sourceMap.get(p.toString).toList.flatMap{ s =>
+        sourceMap.get(p.toString).toList.flatMap { s =>
           val st = s.name
           def findScalaRules(label: String): List[String] =
             ruleMap.get(label).toList.flatMap { rules =>
@@ -79,13 +80,15 @@ class Tasks(
   }
 
   def buildAll(extraFlags: String*): IO[Unit] = trace.trace("buildAll") {
-    api.runBuild(("..." :: "--keep_going" :: extraFlags.toList)*).void
+    api.runBuild(("//..." :: "--keep_going" :: extraFlags.toList)*).void
   }
+
+  def info = api
 
   def buildTargetFiles: IO[List[BuildTargetFiles]] = trace.trace("buildTargetFiles") {
     import dsl._
-    // buildAll() *>
-      buildConfig("...") *>
+    api.runFetch("//...") *>
+      buildConfig("//...") *>
       api
         .aquery(mnemonic("MezelAspect")(deps("...")), "--aspects", aspect)
         .map { x =>

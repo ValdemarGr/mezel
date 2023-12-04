@@ -27,9 +27,9 @@ class BazelAPI(
     buildArgs: List[String],
     aqueryArgs: List[String],
     logger: Logger,
-    trace: Trace
+    trace: Trace,
+    outputBase: Path
 ) {
-  build.QueryResult
   def pipe: Pipe[IO, Byte, String] = _.through(fs2.text.utf8.decode).through(fs2.text.lines)
 
   def run(pb: ProcessBuilder): Resource[IO, Process[IO]] =
@@ -38,7 +38,10 @@ class BazelAPI(
     }
 
   def builder(cmd: String, printLogs: Boolean, args: String*) = {
-    ProcessBuilder("bazel", cmd :: List("--noshow_loading_progress", "--noshow_progress").filter(_ => !printLogs) ++ args.toList)
+    ProcessBuilder(
+      "bazel",
+      s"--output_base=${outputBase}" :: cmd :: List("--noshow_loading_progress", "--noshow_progress").filter(_ => !printLogs) ++ args.toList
+    )
       .withWorkingDirectory(rootDir)
   }
 
@@ -56,11 +59,31 @@ class BazelAPI(
       }
   }
 
+  def info: IO[Map[String, String]] =
+    run(builder("info", printLogs = false)).use { p =>
+      p.stdout
+        .through(pipe)
+        .evalMap { line =>
+          line.split(" ").toList match {
+            case k :: v :: Nil => IO.pure(k -> v)
+            case _ =>
+              val msg = s"Unexpected output from bazel info: $line"
+              logger.logError(msg) *> IO.raiseError(new Exception(msg))
+          }
+        }
+        .concurrently(p.stderr.through(pipe).evalMap(logger.printStdErr))
+        .compile
+        .to(Map)
+    }
+
   def query(q: Query, extra: String*): IO[build.QueryResult] =
     runAndParse[build.QueryResult]("query", q.render :: "--output=proto" :: extra.toList: _*)
 
   def aquery(q: AnyQuery, extra: String*): IO[analysis_v2.ActionGraphContainer] = {
-    val fa = runAndParse[analysis_v2.ActionGraphContainer]("aquery", (q.render :: "--output=proto" :: extra.toList ++ aqueryArgs)*)
+    val fa = runAndParse[analysis_v2.ActionGraphContainer](
+      "aquery",
+      (q.render :: "--output=proto" :: extra.toList ++ aqueryArgs)*
+    )
     // https://github.com/bazelbuild/bazel/issues/15716
     fa.handleErrorWith { _ =>
       logger.logWarn {
@@ -69,9 +92,8 @@ class BazelAPI(
     }
   }
 
-  def runBuild(cmds: String*): IO[Int] = {
-
-    run(builder("build", printLogs = true, (cmds.toList ++ buildArgs)*)).use { p =>
+  def runUnitTask(op: String, cmds: String*): IO[Int] =
+    run(builder(op, printLogs = true, cmds*)).use { p =>
       Stream
         .eval(p.exitValue)
         .concurrently(p.stdout.through(pipe).evalMap(logger.printStdOut))
@@ -79,5 +101,10 @@ class BazelAPI(
         .compile
         .lastOrError
     }
-  }
+
+  def runBuild(cmds: String*): IO[Int] =
+    runUnitTask("build", (cmds.toList ++ buildArgs.toList)*)
+
+  def runFetch(cmds: String*): IO[Int] =
+    runUnitTask("fetch", cmds*)
 }
