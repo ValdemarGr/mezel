@@ -52,8 +52,8 @@ class GraphWatcher(
       case (EvType.Deleted, p)                   => Files[IO].exists(p).map(!_)
     }
 
-  def buildDidChange(events: Chunk[(EvType, Path)]): Boolean =
-    events.exists { case (et, p) =>
+  def buildDidChange(events: Chunk[(EvType, Path)]): IO[Boolean] =
+    events.existsM { case (et, p) =>
       val fn = p.fileName.toString
       // If it's a modified scala file, we can just skip it, everything else causes a build change
       val isSourceMod = (fn.endsWith(".scala") || fn.endsWith(".sc")) && et == EvType.Modified
@@ -61,7 +61,17 @@ class GraphWatcher(
       // Vim creates files with ~ at the end and files named 4913 (and incrementing by 123)
       val isVimFile = fn.endsWith("~") || fn.toIntOption.exists(x => (x - 4913) % 123 === 0)
 
-      !(isSourceMod || isVimFile)
+      val toSkip = isSourceMod || isVimFile
+
+      if (toSkip) IO.pure(false)
+      else {
+        et match {
+          // If it is created but doesn't exist, we can skip it
+          case EvType.Modified | EvType.Created => Files[IO].exists(p)
+          // If it is deleted but exists, we can skip it
+          case EvType.Deleted => Files[IO].exists(p).map(!_)
+        }
+      }
     }
 
   // metals just needs to know if it needs to reimport
@@ -151,14 +161,13 @@ class GraphWatcher(
     trace.logger.logInfo(s"Starting watcher for ${root}") >>
       Files[IO]
         .watch(root)
-        .groupWithin(1024, 150.millis)
+        .groupWithin(1024, 250.millis)
         .evalMap { events =>
           val interesting = eliminateRedundant(extractEvents(events))
-          val bdc = buildDidChange(interesting)
           trace.logger.logInfo(s"${events.size} events unconsed ${events}") *>
             trace.logger.logInfo(s"eliminated ${events.size - interesting.size} uninteresting events ${interesting}") *>
-            trace.logger.logInfo(s"did build change form looking at the interesting events? ${bdc}").as {
-              bdc
+            buildDidChange(interesting).flatTap { bdc =>
+              trace.logger.logInfo(s"did build change form looking at the interesting events? ${bdc}")
             }
         }
         .exists(identity)
