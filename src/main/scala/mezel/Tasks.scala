@@ -113,7 +113,6 @@ class Tasks(
   def diagnosticsFiles: IO[Seq[(String, Path)]] = trace.trace("diagnosticsFiles") {
     import dsl._
 
-    val r = uriToPath(root)
     api.aquery(mnemonic("Scalac")("...")).map { aq =>
       val ext = ActionQueryResultExtensions(aq)
       aq.actions.mapFilter { a =>
@@ -125,7 +124,6 @@ class Tasks(
             if (p.label.endsWith(".diagnosticsproto")) Some(ext.buildPath(p))
             else None
           }
-          .map(r / _)
         res tupleLeft label
       }
     }

@@ -403,7 +403,7 @@ class BspServerOps(
                         labelStream.parEvalMapUnorderedUnbounded { case (label, success) =>
                           val readDiagnostics: IO[diagnostics.TargetDiagnostics] =
                             Files[IO]
-                              .readAll(diagnosticsFiles(label))
+                              .readAll(execRoot / diagnosticsFiles(label))
                               .through(fs2.io.toInputStream[IO])
                               .evalMap(is => IO.blocking(diagnostics.TargetDiagnostics.parseFrom(is)))
                               .compile

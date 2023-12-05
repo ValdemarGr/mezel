@@ -452,3 +452,16 @@ final case class TestReport(
     skipped: Int,
     time: Option[Long]
 ) derives Codec.AsObject
+
+final case class ResourcesParams(
+    targets: List[BuildTargetIdentifier]
+) derives Codec.AsObject
+
+final case class ResourcesResult(
+    items: List[ResourcesItem]
+) derives Codec.AsObject
+
+final case class ResourcesItem(
+    target: BuildTargetIdentifier,
+    resources: List[SafeUri]
+) derives Codec.AsObject

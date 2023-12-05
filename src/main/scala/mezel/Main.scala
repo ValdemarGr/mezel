@@ -73,7 +73,7 @@ object Main
       buildArgs: List[String],
       aqueryArgs: List[String]
   ): IO[Unit] = {
-    Files[IO].createTempDirectory.flatMap { tmpDir =>
+    Files[IO].createTempDirectory(None, "mezel-logs-", None).flatMap { tmpDir =>
       SignallingRef.of[IO, BspState](BspState.empty).flatMap { state =>
         Catch.ioCatch.flatMap { implicit C =>
           C.use[Unit] { Exit =>
@@ -127,6 +127,8 @@ object Main
                                   IO.pure(Some(ScalaTestClassesResult(Nil).asJson))
                                 case "buildTarget/compile" =>
                                   expect[CompileParams].flatMap(p => ops.compile(p.targets.map(_.uri)))
+                                case "buildTarget/resources" =>
+                                  expect[ResourcesParams].map(p => Some(ResourcesResult(p.targets.map(t => ResourcesItem(t, Nil))).asJson))
                                 case "build/exit" | "build/shutdown" => Exit.raise(())
                                 // I got this while testing?
                                 case "$/cancelRequest" => IO.pure(None)
