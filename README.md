@@ -2,6 +2,27 @@
 Mezel is a Scala [BSP](https://build-server-protocol.github.io/) implementation for Bazel.
 Mezel acts as a communication layer between Bazel and Scala BSP consumers such as [Metals](https://scalameta.org/metals/).
 
+Mezel is work-in-progress but I daily drive it with Metals using NeoVim, but any Metals editor should work.
+A non-exhaustive list of features that work:
+* Semanticdb consumption from Bazel (code navigation)
+* External dependencies (from maven for instance, but also locally built and imported jars)
+* Presentation compiler support with plugins (type hints and such)
+* Caching of semanticdb files (bazel clears the output directory on every build)
+* Streamed diagnostics reporting for errors and warnings (diagnostics will appear as they are generated instead of waiting for the build to finish)
+* Build change propagation (mezel always builds all targets so you get full diagnostics)
+* Logging of all build events with performance traces
+* Uses a custom `--output_base` to avoid destroying your build cache
+* Custom build/query flags
+* Semi-automatic configuration generation
+
+Things that I will be working that Mezel doesn't support yet:
+* Caching of output jars/ijars from local targets (improves DX on big refactorings since transitive jars will persist through bazel output extermination)
+* Support for an add-it-all-to-classpath mode such that you won't need to add a dependency to your BUILD.bazel for it to be available in your IDE?
+* Better artifact distribution
+* Infer watch-sources instead of hardcoding them
+* Scala3 support
+* More caching to avoid unnecessary invocations of `bazel query` (faster response times)
+
 ## Getting started
 ### Scala rules setup
 Make sure that you are using version `f9381414068466b9c74ff7681d204e1eb19c7f80` or newer of the bazel scala rules.
