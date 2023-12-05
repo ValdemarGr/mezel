@@ -33,25 +33,28 @@ object Logger {
           LogMessageParams(messageType, taskId, originId, msg)
         )
 
+      // these are unstable in the spec
       override def printStdOut(msg: String): IO[Unit] =
-        originId match {
-          case None => logInfo(msg)
-          case Some(x) =>
-            sendNotification(
-              "run/printStdout",
-              PrintParams(x, taskId, msg)
-            )
-        }
+        logInfo(msg)
+        // originId match {
+        //   case None => logInfo(msg)
+        //   case Some(x) =>
+        //     sendNotification(
+        //       "run/printStdout",
+        //       PrintParams(x, taskId, msg)
+        //     )
+        // }
 
       override def printStdErr(msg: String): IO[Unit] =
-        originId match {
-          case None => logInfo(msg)
-          case Some(x) =>
-            sendNotification(
-              "run/printStderr",
-              PrintParams(x, taskId, msg)
-            )
-        }
+        logInfo(msg)
+        // originId match {
+        //   case None => logInfo(msg)
+        //   case Some(x) =>
+        //     sendNotification(
+        //       "run/printStderr",
+        //       PrintParams(x, taskId, msg)
+        //     )
+        // }
 
       override def logWarn(msg: String): IO[Unit] =
         sendLog(msg, MessageType.Warning)

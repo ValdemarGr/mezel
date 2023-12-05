@@ -21,6 +21,7 @@ import cats.derived.*
 import alleycats.*
 import fs2.io.process.*
 import scalapb._
+import cats.effect.std.Env
 
 class BazelAPI(
     rootDir: Path,
@@ -104,8 +105,9 @@ class BazelAPI(
         .lastOrError
     }
 
-  def runBuild(cmds: String*): IO[Int] =
+  def runBuild(cmds: String*): IO[Int] = {
     runUnitTask("build", (cmds.toList ++ buildArgs.toList)*)
+  }
 
   def runFetch(cmds: String*): IO[Int] =
     runUnitTask("fetch", cmds*)
