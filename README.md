@@ -121,14 +121,14 @@ If you want to supply custom flags to Mezel, you can do so by modifying the `mez
 To see what flags are available, you can run the binary with the `--help` flag:
 ```bash
 # cat .bsp/mezel.json
-# {"argv":["java","-jar","bazel-out/k8-fastbuild/bin/external/mezel/rules/mezel.jar"],"bspVersion":"2.0.0","languages":["scala"],"name":"Mezel","version":"1.0.0"}
-java -jar bazel-out/k8-fastbuild/bin/external/mezel/rules/mezel.jar --help
+# {"argv":["bazel", "run", "@mezel//rules:mezel_binary", "--"],"bspVersion":"2.0.0","languages":["scala"],"name":"Mezel","version":"1.0.0"}
+bazel run @mezel//rules:mezel_binary -- --help
 ```
 
 For instance, using a custom toolchain and set of configuration options for local development (semanticdb + diagnostics + no fatal warnings):
 ```json
 {"argv":[
-  "java", "-jar", "bazel-out/k8-fastbuild/bin/external/mezel/rules/mezel.jar",
+  "bazel", "run", "@mezel//rules:mezel_binary", "--",
   "--build-arg", "--extra_toolchains=//toolchain:lsp",
   "--build-arg", "--define=no_fatal_warnings=true",
   "--aquery-arg", "--extra_toolchains=//toolchain:lsp",
