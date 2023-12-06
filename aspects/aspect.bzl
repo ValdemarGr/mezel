@@ -56,13 +56,16 @@ def _mezel_aspect(target, ctx):
   ]
   direct_dep_labels = [x.label for x in dep_outputs]
 
-  # transitive_labels = depset([target.label], transitive = [x.transitive_labels for x in dep_outputs])
-  # IDK why, but ignoring generated jars breaks the build, even though we are careful whith what we ignore.?
-  # maybe it is because metals doesn't respect transitive projects? I don't know.
-  ignore = [] #transitive_labels.to_list()
+  transitive_labels = depset([target.label], transitive = [x.transitive_labels for x in dep_outputs])
+  ignore = transitive_labels.to_list()
+
+  output_class_jars = [x.class_jar.path for x in target[JavaInfo].java_outputs]
+  if (len(output_class_jars) != 1):
+    fail("Expected exactly one output class jar, got {}".format(output_class_jars))
+  output_class_jar = output_class_jars[0]
 
   transitive_compile_jars = target[JavaInfo].transitive_compile_time_jars.to_list()
-  cp_jars = [x.path for x in transitive_compile_jars if x.owner not in ignore]
+  cp_jars = [x.path for x in transitive_compile_jars if x.owner != target.label]
   transitive_source_jars = target[JavaInfo].transitive_source_jars.to_list()
   src_jars = [x.path for x in transitive_source_jars if x.owner not in ignore]
 
@@ -89,6 +92,7 @@ def _mezel_aspect(target, ctx):
     plugins= plugins,
     classpath= cp_jars,
     targetroot= semanticdb_target_root,
+    outputClassJar = output_class_jar
   )
   ctx.actions.write(scalac_options_file, json.encode(scalac_options_content))
 
@@ -123,7 +127,7 @@ def _mezel_aspect(target, ctx):
   files = struct(
     label = target.label,
     # target_dir = ctx.label.workspace_root + extra + ctx.label.package
-    # transitive_labels = transitive_labels,
+    transitive_labels = transitive_labels,
   )
 
   transitive_output_files = [

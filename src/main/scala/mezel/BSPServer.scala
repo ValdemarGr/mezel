@@ -463,20 +463,21 @@ class BspServerOps(
 
   def sources(targets: List[SafeUri]): IO[Option[Json]] =
     workspaceRoot.flatMap { wsr =>
-      readSources.map { srcs =>
-        Some {
-          SourcesResult {
-            srcs.toList.map { case (label, src) =>
-              SourcesItem(
-                buildIdent(label),
-                src.sources
-                  .map(x => pathFullToUri(wsr, Path(x)))
-                  .map(SourceItem(_, SourceItemKind.File, false))
-                  .toList,
-                Nil
-              )
+      derivedExecRoot.flatMap { execRoot =>
+        readSources.flatMap { srcs =>
+          srcs.toList
+            .traverse { case (label, src) =>
+              src.sources
+                .traverse(x => IO(Path.fromNioPath((execRoot / x).toNioPath.toRealPath())).map(pathToUri))
+                .map { xs =>
+                  SourcesItem(
+                    buildIdent(label),
+                    xs.map(SourceItem(_, SourceItemKind.File, false)),
+                    Nil
+                  )
+                }
             }
-          }.asJson
+            .map(ss => Some(SourcesResult(ss).asJson))
         }
       }
     }
@@ -499,7 +500,8 @@ class BspServerOps(
                       s"-Xplugin:${(execRoot / Path(sco.semanticdbPlugin))}"
                     ) ++ sco.plugins.map(x => s"-Xplugin:${execRoot / x}")).distinct,
                     sco.classpath.map(x => pathToUri(execRoot / x)),
-                    semanticdbDir.absolute.toNioPath.toUri().toString // cachedSemanticdbPath(sco.targetroot).absolute.toString()
+                    (execRoot / sco.outputClassJar).toNioPath.toUri().toString()
+                    // semanticdbDir.absolute.toNioPath.toUri().toString // cachedSemanticdbPath(sco.targetroot).absolute.toString()
                   )
                 }
               }.asJson

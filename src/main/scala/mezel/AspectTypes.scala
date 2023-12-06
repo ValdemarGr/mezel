@@ -10,6 +10,7 @@ object AspectTypes {
       semanticdbPlugin: String,
       classpath: List[String],
       targetroot: String,
+      outputClassJar: String
   ) derives Decoder
 
   final case class Sources(

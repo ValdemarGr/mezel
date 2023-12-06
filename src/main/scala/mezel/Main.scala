@@ -87,7 +87,7 @@ object Main
                 val ioStream: Stream[IO, Unit] = {
                   read
                     .observe(Files[IO].writeAll(fromMetals))
-                    .through(fs2.text.utf8.decode)
+                    // .through(fs2.text.utf8.decode)
                     // .evalTap(x => IO.println(s"Received: data of size ${x.size}"))
                     .through(jsonRpcRequests)
                     // .evalTap(x => IO.println(s"Request: ${x.method}"))
