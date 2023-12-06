@@ -173,14 +173,14 @@ def convertDiagnostic(
 
 class BspServerOps(
     state: SignallingRef[IO, BspState],
-    requestDone: Deferred[IO, Unit],
+    // requestDone: Deferred[IO, Unit],
     sup: Supervisor[IO],
     output: Channel[IO, Json],
     buildArgs: List[String],
     aqueryArgs: List[String],
     logger: Logger,
     trace: Trace,
-    watchDirectories: NonEmptyList[Path]
+    // watchDirectories: NonEmptyList[Path]
 )(implicit R: Raise[IO, BspResponseError]) {
   import _root_.io.circe.syntax.*
 

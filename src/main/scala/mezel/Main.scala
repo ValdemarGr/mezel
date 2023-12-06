@@ -51,15 +51,15 @@ object Main
     )
     .orEmpty
 
-  val watchDirectoriesFlag = Opts
-    .options[String](
-      "watch",
-      "Paths to watch for changes, defaults to ./src"
-    )
-    .withDefault(NonEmptyList.of("./src"))
+  // val watchDirectoriesFlag = Opts
+  //   .options[String](
+  //     "watch",
+  //     "Paths to watch for changes, defaults to ./src"
+  //   )
+  //   .withDefault(NonEmptyList.of("./src"))
 
-  def main: Opts[IO[ExitCode]] = (fsFlag, buildArgsFlag, aqueryArgsFlag, watchDirectoriesFlag).mapN {
-    case (fs, buildArgs, aqueryArgs, watchDirectories) =>
+  def main: Opts[IO[ExitCode]] = (fsFlag, buildArgsFlag, aqueryArgsFlag/*, watchDirectoriesFlag*/).mapN {
+    case (fs, buildArgs, aqueryArgs/*, watchDirectories*/) =>
       val (stdin, stdout) = if (fs) {
         (
           Files[IO].tail(Path("/tmp/from-metals")),
@@ -72,7 +72,7 @@ object Main
         )
       }
 
-      runWithIO(stdin, stdout, buildArgs, aqueryArgs, watchDirectories.map(Path(_))).as(ExitCode.Success)
+      runWithIO(stdin, stdout, buildArgs, aqueryArgs/*, watchDirectories.map(Path(_))*/).as(ExitCode.Success)
   }
 
   def runWithIO(
@@ -80,7 +80,7 @@ object Main
       write: Pipe[IO, Byte, Unit],
       buildArgs: List[String],
       aqueryArgs: List[String],
-      watchDirectories: NonEmptyList[Path]
+      //watchDirectories: NonEmptyList[Path]
   ): IO[Unit] = {
     Files[IO].createTempDirectory(None, "mezel-logs-", None).flatMap { tmpDir =>
       SignallingRef.of[IO, BspState](BspState.empty).flatMap { state =>
@@ -101,7 +101,7 @@ object Main
                     .through(jsonRpcRequests)
                     // .evalTap(x => IO.println(s"Request: ${x.method}"))
                     .evalMap { x =>
-                      IO.deferred[Unit].flatMap { done =>
+                      // IO.deferred[Unit].flatMap { done =>
                         val originId = x.params.flatMap(_.asObject).flatMap(_.apply("originId")).flatMap(_.asString)
 
                         def expect[A: Decoder]: IO[A] =
@@ -116,14 +116,14 @@ object Main
                             val ops: BspServerOps =
                               new BspServerOps(
                                 state,
-                                done,
+                                // done,
                                 sup,
                                 output,
                                 buildArgs,
                                 aqueryArgs,
                                 lg,
                                 trace,
-                                watchDirectories
+                                //watchDirectories
                               )
 
                             trace.trace("root") {
@@ -168,9 +168,9 @@ object Main
                         }
 
                         handleError.flatMap { msg =>
-                          msg.map(_.asJson).traverse_(output.send).flatMap(_ => done.complete(())).void
+                          msg.map(_.asJson).traverse_(output.send)//.flatMap(_ => done.complete(())).void
                         }
-                      }
+                      // }
                     }
                 }
 
