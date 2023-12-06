@@ -39,8 +39,8 @@ class Tasks(
 
   def api = BazelAPI(uriToPath(root), buildArgs, aqueryArgs, logger, trace, Some(outputBase))
 
-  def buildTargetCache: IO[BuildTargetCache] =
-    buildTargetFiles.map(xs => xs.map(x => x.label -> x)).map(BuildTargetCache(_)) // .flatMap(fromTargets)
+  def buildTargetCache(execRoot: Path): IO[BuildTargetCache] =
+    buildTargetFiles(execRoot).map(xs => xs.map(x => x.label -> x)).map(BuildTargetCache(_)) // .flatMap(fromTargets)
 
   def buildTargetRdeps(paths: String*): IO[List[String]] = {
     import dsl._
@@ -83,7 +83,14 @@ class Tasks(
     api.runBuild(("//..." :: "--keep_going" :: extraFlags.toList)*).void
   }
 
-  def buildTargetFiles: IO[List[BuildTargetFiles]] = trace.trace("buildTargetFiles") {
+  // def localRepositories = trace.trace("localRepositories") {
+  //   import dsl._
+  //   val q = kind(".*local_repository")("//external:*")
+  //   // api.query("")
+  //   IO.unit
+  // }
+
+  def buildTargetFiles(execRoot: Path): IO[List[BuildTargetFiles]] = trace.trace("buildTargetFiles") {
     import dsl._
     api.runFetch("//...") *>
       buildConfig("//...") *>
@@ -98,13 +105,12 @@ class Tasks(
             val s = pfs.find(_.label.endsWith("bsp_sources.json")).get
             val ds = pfs.find(_.label.endsWith("bsp_dependency_sources.json")).get
             val bt = pfs.find(_.label.endsWith("build_target.json")).get
-            val r = uriToPath(root)
             BuildTargetFiles(
               ext.targetMap(act.targetId),
-              r / ext.buildPath(so),
-              r / ext.buildPath(s),
-              r / ext.buildPath(ds),
-              r / ext.buildPath(bt)
+              execRoot / ext.buildPath(so),
+              execRoot / ext.buildPath(s),
+              execRoot / ext.buildPath(ds),
+              execRoot / ext.buildPath(bt)
             )
           }
         }

@@ -113,7 +113,7 @@ def jsonRpcParser: Pipe[IO, Byte, Json] = { stream =>
       stream: Stream[IO, Byte]
   ): Pull[IO, Json, Unit] = {
     stream.pull.uncons.flatMap {
-      case None => Pull.raiseError[IO](new RuntimeException("No content"))
+      case None => Pull.raiseError[IO](new RuntimeException("No more content"))
       case Some((hd, tl)) =>
         hd.indexWhere(_.toChar === '\n') match {
           case None => go(state, carry ++ hd, tl)
@@ -124,7 +124,7 @@ def jsonRpcParser: Pipe[IO, Byte, Json] = { stream =>
 
             if (hdr === "\r\n") {
               state.contentLength match {
-                case None => Pull.raiseError[IO](new RuntimeException("No content length"))
+                case None => Pull.raiseError[IO](new RuntimeException("No content length, but content found"))
                 case Some(len) =>
                   tl2.pull.unconsN(len).flatMap {
                     case None => Pull.raiseError[IO](new RuntimeException("No content"))
@@ -135,7 +135,8 @@ def jsonRpcParser: Pipe[IO, Byte, Json] = { stream =>
               }
             } else {
               (clParser eitherOr ctParser).parseAll(hdr) match {
-                case Left(err) => Pull.raiseError[IO](new RuntimeException(err.toString()))
+                case Left(err) =>
+                  Pull.raiseError[IO](new RuntimeException(s"failed to parse headers ${hdr} with error ${err.toString()}"))
                 case Right(Right(cl)) =>
                   val newState = state.copy(contentLength = Some(cl.toInt))
                   go(newState, carry, tl2)

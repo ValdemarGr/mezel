@@ -11,9 +11,10 @@ A non-exhaustive list of features that work:
 * Streamed diagnostics reporting for errors and warnings (diagnostics will appear as they are generated instead of waiting for the build to finish)
 * Build change propagation (mezel always builds all targets so you get full diagnostics)
 * Logging of all build events with performance traces
-* Uses a custom `--output_base` to avoid destroying your build cache
+* Build isolation, uses a custom `--output_base` to avoid destroying your build cache
 * Custom build/query flags
 * Semi-automatic configuration generation
+* Minimal build target definitons using ijars over jars
 
 Things that I will be working that Mezel doesn't support yet:
 * Caching of output jars/ijars from local targets (improves DX on big refactorings since transitive jars will persist through bazel output extermination)
@@ -21,6 +22,7 @@ Things that I will be working that Mezel doesn't support yet:
 * Better artifact distribution
 * Infer watch-sources instead of hardcoding them
 * Scala3 support
+* Verification of IntelliJ support
 * More caching to avoid unnecessary invocations of `bazel query` (faster response times)
 
 ## Getting started

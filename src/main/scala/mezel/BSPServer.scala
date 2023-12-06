@@ -84,7 +84,9 @@ final case class ActionQueryResultExtensions(
 final case class BspState(
     workspaceRoot: Option[SafeUri],
     sourceEnv: Option[Map[String, String]],
+    derivedEnvCache: Option[Map[String, String]],
     buildTargetCache: Option[BuildTargetCache],
+    diagnosticsFilesCache: Option[Map[String, Path]],
     prevDiagnostics: Map[BuildTargetIdentifier, List[TextDocumentIdentifier]] = Map.empty
 )
 
@@ -106,7 +108,7 @@ def buildIdent(label: String): BuildTargetIdentifier = {
 def uriToPath(suri: SafeUri): Path = Path.fromNioPath(Paths.get(new URI(suri.value)))
 
 object BspState {
-  val empty: BspState = BspState(None, None, None)
+  val empty: BspState = BspState(None, None, None, None, None)
 }
 
 def convertDiagnostic(
@@ -177,7 +179,8 @@ class BspServerOps(
     buildArgs: List[String],
     aqueryArgs: List[String],
     logger: Logger,
-    trace: Trace
+    trace: Trace,
+    watchDirectories: NonEmptyList[Path]
 )(implicit R: Raise[IO, BspResponseError]) {
   import _root_.io.circe.syntax.*
 
@@ -243,10 +246,25 @@ class BspServerOps(
     }
 
   def derivedEnv: IO[Map[String, String]] =
-    workspaceRoot.flatMap(mkTasks).flatMap(_.api.info)
+    state.get.map(_.derivedEnvCache).flatMap {
+      case Some(cached) => IO.pure(cached)
+      case None         => 
+        workspaceRoot
+          .flatMap(mkTasks).flatMap(_.api.info)
+          .flatTap(x => state.update(_.copy(derivedEnvCache = Some(x))))
+    }
 
   def derivedExecRoot: IO[Path] =
     derivedEnv.map(_.apply("execution_root")).map(Path(_))
+
+  def diagnosticsFiles =
+    state.get.map(_.diagnosticsFilesCache).flatMap {
+      case Some(cached) => IO.pure(cached)
+      case None =>
+        tasks
+          .flatMap(_.diagnosticsFiles.map(_.toMap))
+          .flatTap(x => state.update(_.copy(diagnosticsFilesCache = Some(x))))
+    }
 
   def cacheFolder: IO[Path] =
     workspaceRoot.flatMap { wsr =>
@@ -299,7 +317,15 @@ class BspServerOps(
       // TODO find roots automatically
       sup
         .supervise {
-          gw.startWatcher(uriToPath(msg.rootUri) / "src") >>
+          // Files[IO]
+          //   .list(uriToPath(msg.rootUri))
+          //   .filter(p => !p.fileName.startsWith("bazel-"))
+          //   .compile
+          //   .toList
+          // .map{ p =>
+          //   p
+          // }
+          gw.startWatcher(NonEmptyList.one(uriToPath(msg.rootUri).parent.get) /*watchDirectories*/ ) >>
             sendNotification(
               "buildTarget/didChange",
               DidChangeBuildTarget(
@@ -336,7 +362,7 @@ class BspServerOps(
                 testProvider = None,
                 runProvider = None,
                 debugProvider = None,
-                inverseSourcesProvider = Some(true),
+                inverseSourcesProvider = Some(false),
                 dependencySourcesProvider = Some(true),
                 dependencyModulesProvider = None,
                 resourcesProvider = Some(true),
@@ -378,7 +404,7 @@ class BspServerOps(
         prevDiagnostics.flatMap { prevDiagnostics =>
           cacheFolder.flatMap { cacheDir =>
             derivedExecRoot.flatMap { execRoot =>
-              t.diagnosticsFiles.map(_.toMap).flatMap { diagnosticsFiles =>
+              diagnosticsFiles.flatMap { diagnosticsFiles =>
                 Files[IO].tempFile
                   .use { tmp =>
                     val writeFiles = Stream.eval(readId).flatMap { xs =>
@@ -519,7 +545,7 @@ class BspServerOps(
         workspaceRoot.flatMap { wsr =>
           tasks.flatMap { t =>
             derivedExecRoot.flatMap { execRoot =>
-              t.buildTargetCache.flatMap(btc => state.update(_.copy(buildTargetCache = Some(btc)))) >>
+              t.buildTargetCache(execRoot).flatMap(btc => state.update(_.copy(buildTargetCache = Some(btc)))) >>
                 readBuildTargets.map { bts =>
                   val targets = bts.toList.map { case (label, bt) =>
                     BuildTarget(

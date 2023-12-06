@@ -1,5 +1,6 @@
 package mezel
 
+import cats.data._
 import cats.implicits._
 import scala.concurrent.duration._
 import cats.effect.{Trace => _, *}
@@ -151,19 +152,23 @@ class GraphWatcher(
   // }
 
   def startWatcher(
-      root: Path
+      paths: NonEmptyList[Path]
       // init: BuildTargetCache
   ): IO[Unit] = {
     // val genLabels = trace.trace("genLabels") {
     //   tasks.buildTargetCache.map(_.buildTargets.map { case (k, _) => k }.toSet)
     // }
     // genLabels.map { init =>
-    trace.logger.logInfo(s"Starting watcher for ${root}") >>
-      Files[IO]
-        .watch(root)
+    trace.logger.logInfo(s"Starting watcher for ${paths.map(p => s"'${p.toString}'").mkString_(", ")}") >>
+      Stream
+        .emits(paths.toList)
+        .map(Files[IO].watch)
+        .parJoinUnbounded
         .groupWithin(1024, 250.millis)
+        .map(extractEvents(_).filter { case (_, p) => !(p.toString.contains("bazel-") || p.toString.contains("/.")) })
+        .filter(_.nonEmpty)
         .evalMap { events =>
-          val interesting = eliminateRedundant(extractEvents(events))
+          val interesting = eliminateRedundant(events)
           trace.logger.logInfo(s"${events.size} events unconsed ${events}") *>
             trace.logger.logInfo(s"eliminated ${events.size - interesting.size} uninteresting events ${interesting}") *>
             buildDidChange(interesting).flatTap { bdc =>

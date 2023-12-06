@@ -51,27 +51,36 @@ object Main
     )
     .orEmpty
 
-  def main: Opts[IO[ExitCode]] = (fsFlag, buildArgsFlag, aqueryArgsFlag).mapN { case (fs, buildArgs, aqueryArgs) =>
-    val (stdin, stdout) = if (fs) {
-      (
-        Files[IO].tail(Path("/tmp/from-metals")),
-        Files[IO].writeAll(Path("/tmp/to-metals"))
-      )
-    } else {
-      (
-        fs2.io.stdin[IO](4096),
-        fs2.io.stdout[IO]
-      )
-    }
+  val watchDirectoriesFlag = Opts
+    .options[String](
+      "watch",
+      "Paths to watch for changes, defaults to ./src"
+    )
+    .withDefault(NonEmptyList.of("./src"))
 
-    runWithIO(stdin, stdout, buildArgs, aqueryArgs).as(ExitCode.Success)
+  def main: Opts[IO[ExitCode]] = (fsFlag, buildArgsFlag, aqueryArgsFlag, watchDirectoriesFlag).mapN {
+    case (fs, buildArgs, aqueryArgs, watchDirectories) =>
+      val (stdin, stdout) = if (fs) {
+        (
+          Files[IO].tail(Path("/tmp/from-metals")),
+          Files[IO].writeAll(Path("/tmp/to-metals"))
+        )
+      } else {
+        (
+          fs2.io.stdin[IO](4096),
+          fs2.io.stdout[IO]
+        )
+      }
+
+      runWithIO(stdin, stdout, buildArgs, aqueryArgs, watchDirectories.map(Path(_))).as(ExitCode.Success)
   }
 
   def runWithIO(
       read: Stream[IO, Byte],
       write: Pipe[IO, Byte, Unit],
       buildArgs: List[String],
-      aqueryArgs: List[String]
+      aqueryArgs: List[String],
+      watchDirectories: NonEmptyList[Path]
   ): IO[Unit] = {
     Files[IO].createTempDirectory(None, "mezel-logs-", None).flatMap { tmpDir =>
       SignallingRef.of[IO, BspState](BspState.empty).flatMap { state =>
@@ -105,7 +114,17 @@ object Main
                             val lg = logger(originId)
                             val trace = Trace.in(x.method, lg)
                             val ops: BspServerOps =
-                              new BspServerOps(state, done, sup, output, buildArgs, aqueryArgs, lg, trace)
+                              new BspServerOps(
+                                state,
+                                done,
+                                sup,
+                                output,
+                                buildArgs,
+                                aqueryArgs,
+                                lg,
+                                trace,
+                                watchDirectories
+                              )
 
                             trace.trace("root") {
                               x.method match {
