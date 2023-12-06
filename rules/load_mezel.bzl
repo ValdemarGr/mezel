@@ -1,9 +1,9 @@
 load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_jar")
 
 def load_mezel():
-  version = "v0.0.8"
+  version = "v0.0.9"
   http_jar(
       name = "mezel_binary",
       url = "https://github.com/valdemargr/mezel/releases/download/{}/{}".format(version, "mezel.jar"),
-      sha256 = "4b113a59ab0197a09944cb691f7b8763a5f1d2d79b8c53cf2c642d88f8d09da1"
+      sha256 = "b538894e0ce769b958dbe5eff84ea8ab72bff1bb4cf75c94cd3e2f02a552916f"
   )
