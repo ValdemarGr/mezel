@@ -92,7 +92,8 @@ def _mezel_aspect(target, ctx):
     plugins= plugins,
     classpath= cp_jars,
     targetroot= semanticdb_target_root,
-    outputClassJar = output_class_jar
+    outputClassJar = output_class_jar,
+    compilerVersion = compiler_version,
   )
   ctx.actions.write(scalac_options_file, json.encode(scalac_options_content))
 

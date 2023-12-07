@@ -11,10 +11,10 @@ scala_toolchain(
                 "-language:existentials",
                 "-language:higherKinds",
                 "-language:implicitConversions",
+                "-Wunused:all"
+                # "-Ytasty-reader"
             ],
     visibility = ["//visibility:public"],
-    strict_deps_mode = "error",
-    unused_dependency_checker_mode = "error", 
     dependency_tracking_method = "ast",
     enable_diagnostics_report = True,
     dependency_mode = "plus-one",

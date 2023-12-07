@@ -179,7 +179,7 @@ class BspServerOps(
     buildArgs: List[String],
     aqueryArgs: List[String],
     logger: Logger,
-    trace: Trace,
+    trace: Trace
     // watchDirectories: NonEmptyList[Path]
 )(implicit R: Raise[IO, BspResponseError]) {
   import _root_.io.circe.syntax.*
@@ -248,9 +248,10 @@ class BspServerOps(
   def derivedEnv: IO[Map[String, String]] =
     state.get.map(_.derivedEnvCache).flatMap {
       case Some(cached) => IO.pure(cached)
-      case None         => 
+      case None =>
         workspaceRoot
-          .flatMap(mkTasks).flatMap(_.api.info)
+          .flatMap(mkTasks)
+          .flatMap(_.api.info)
           .flatTap(x => state.update(_.copy(derivedEnvCache = Some(x))))
     }
 
@@ -427,19 +428,27 @@ class BspServerOps(
                             }
 
                         labelStream.parEvalMapUnorderedUnbounded { case (label, success) =>
-                          val readDiagnostics: IO[diagnostics.TargetDiagnostics] =
-                            Files[IO]
-                              .readAll(execRoot / diagnosticsFiles(label))
-                              .through(fs2.io.toInputStream[IO])
-                              .evalMap(is => IO.blocking(diagnostics.TargetDiagnostics.parseFrom(is)))
-                              .compile
-                              .lastOrError
+                          val p = execRoot / diagnosticsFiles(label)
+
+                          val readDiagnostics: IO[Option[diagnostics.TargetDiagnostics]] =
+                            Files[IO].exists(p).flatMap {
+                              case false =>
+                                trace.logger.logWarn(s"no diagnostics file for $label, this will cause a degraded experience").as(None)
+                              case true =>
+                                Files[IO]
+                                  .readAll(execRoot / diagnosticsFiles(label))
+                                  .through(fs2.io.toInputStream[IO])
+                                  .evalMap(is => IO.blocking(diagnostics.TargetDiagnostics.parseFrom(is)))
+                                  .compile
+                                  .lastOrError
+                                  .map(Some(_))
+                            }
 
                           // if there are no diagnostics for a target, clear the diagnostics
                           // if there are diagnostics for a target, publish them
-                          val publishDiag: IO[Unit] = readDiagnostics.flatMap { td =>
+                          val publishDiag: IO[Unit] = readDiagnostics.flatMap { tdOpt =>
                             val bti = buildIdent(label)
-                            val xs = convertDiagnostic(wsr, bti, td)
+                            val xs = tdOpt.toList.flatMap(convertDiagnostic(wsr, bti, _))
                             val prevHere = prevDiagnostics.get(bti).toList.flatten
                             val toClear = prevHere.toSet -- xs.map(_.textDocument)
 
@@ -517,14 +526,25 @@ class BspServerOps(
               ScalacOptionsResult {
                 scos.toList.map { case (label, sco) =>
                   val semanticdbDir = cacheDir / sco.targetroot
+
+                  val semanticDBFlags =
+                    if (sco.compilerVersion.major === 2) {
+                      List(
+                        s"-P:semanticdb:targetroot:${semanticdbDir.toString}",
+                        "-Xplugin-require:semanticdb",
+                        s"-Xplugin:${(execRoot / Path(sco.semanticdbPlugin))}"
+                      )
+                    } else
+                      List(
+                        "-Xsemanticdb",
+                        // This is from the docs
+                        "-semanticdb-target",
+                        semanticdbDir.toString
+                      )
+
                   ScalacOptionsItem(
                     buildIdent(label),
-                    (sco.scalacopts ++ List(
-                      s"-P:semanticdb:targetroot:${semanticdbDir.toString /*cachedSemanticdbPath(sco.targetroot)*/}",
-                      s"-P:semanticdb:sourceroot:${semanticdbDir.toString /*cachedSemanticdbPath(sco.targetroot)*/}",
-                      "-Xplugin-require:semanticdb",
-                      s"-Xplugin:${(execRoot / Path(sco.semanticdbPlugin))}"
-                    ) ++ sco.plugins.map(x => s"-Xplugin:${execRoot / x}")).distinct,
+                    (sco.scalacopts ++ semanticDBFlags ++ sco.plugins.map(x => s"-Xplugin:${execRoot / x}")).distinct,
                     sco.classpath.map(x => pathToUri(execRoot / x)),
                     (execRoot / sco.outputClassJar).toNioPath.toUri().toString()
                     // semanticdbDir.absolute.toNioPath.toUri().toString // cachedSemanticdbPath(sco.targetroot).absolute.toString()

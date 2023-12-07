@@ -139,10 +139,10 @@ def jsonRpcParser: Pipe[IO, Byte, Json] = { stream =>
                   Pull.raiseError[IO](new RuntimeException(s"failed to parse headers ${hdr} with error ${err.toString()}"))
                 case Right(Right(cl)) =>
                   val newState = state.copy(contentLength = Some(cl.toInt))
-                  go(newState, carry, tl2)
+                  go(newState, Chunk.empty, tl2)
                 case Right(Left(ct)) =>
                   val newState = state.copy(contentType = Some(ct))
-                  go(newState, carry, tl2)
+                  go(newState, Chunk.empty, tl2)
               }
             }
         }

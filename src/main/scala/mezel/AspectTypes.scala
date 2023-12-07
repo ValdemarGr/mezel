@@ -10,7 +10,8 @@ object AspectTypes {
       semanticdbPlugin: String,
       classpath: List[String],
       targetroot: String,
-      outputClassJar: String
+      outputClassJar: String,
+      compilerVersion: ScalaVersion,
   ) derives Decoder
 
   final case class Sources(
