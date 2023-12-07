@@ -7,7 +7,7 @@ object Main extends App {
     val b = 2
 
     // cats.effect.IO
-    val c = false + b
+    // val c = false + b
     1
   }
   println("hello world")
