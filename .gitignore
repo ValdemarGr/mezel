@@ -8,6 +8,6 @@ hs_err_pid*
 .bloop
 project/project
 **/target
-.bsp
+.bsp/sbt.json
 
 bazel-*
