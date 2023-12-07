@@ -1,12 +1,11 @@
 load("@io_bazel_rules_scala//scala:scala.bzl", "scala_library")
 
 scala_library(
-    name = "example",
+    name = "dep",
     srcs = glob(["*.scala"]),
     visibility = ["//visibility:public"],
     deps = [
-      "@maven//:org_typelevel_cats_effect_3",
-      "//example/src/main/scala/example/dep"
+      "@maven//:org_typelevel_cats_effect_3"
     ],
 )
 
