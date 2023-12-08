@@ -10,7 +10,7 @@ BuildTargetInfo = provider(
 
 rule_kinds = [
   "scala_library",
-  # "scala_binary",
+  "scala_binary",
   "scala_test",
   "scala_junit_test"
 ]
