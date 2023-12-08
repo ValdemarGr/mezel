@@ -385,16 +385,18 @@ class BspServerOps(
       //   logger.logInfo(s"watching ${r.absolute.toString()}") >>
       //     Files[IO].watch(r).evalMap { e => logger.logInfo(e.toString()) }.compile.drain
       // } *>
-      readDependencySources.map { ds =>
-        Some {
-          DependencySourcesResult {
-            ds.toList.map { case (label, ds) =>
-              DependencySourcesItem(
-                buildIdent(label),
-                ds.sourcejars.map(x => pathFullToUri(wsr, Path(x))).toList
-              )
-            }
-          }.asJson
+      derivedExecRoot.flatMap { execRoot =>
+        readDependencySources.map { ds =>
+          Some {
+            DependencySourcesResult {
+              ds.toList.map { case (label, ds) =>
+                DependencySourcesItem(
+                  buildIdent(label),
+                  ds.sourcejars.map(x => pathToUri(execRoot / x)).toList
+                )
+              }
+            }.asJson
+          }
         }
       }
     }
