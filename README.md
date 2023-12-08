@@ -113,9 +113,14 @@ bazel run @mezel//rules:gen_bsp_config /path/to/workspace
 ```
 
 And that's it. Start your editor and select `Mezel` as your BSP server.
+
+### External dependencies
+External dependencies should work but have only been tested with [rules_jvm_external](https://github.com/bazelbuild/rules_jvm_external).
+When you import external dependencies you must ensure that you fetch their sources also, such that there are sources to navigate to on "goto definition" type actions.
+For rules_jvm_external you can flag this in your `maven_install` as seen [here](https://github.com/bazelbuild/rules_jvm_external#fetch-source-jars).
+
 ### Configuration
 I suggest checking your bsp file into VCS `.bsp/mezel.json` since it'll likely contain custom flags.
-The path to the java binary should be stable for every user since it will be relative to your workspace root.
 
 If you want to supply custom flags to Mezel, you can do so by modifying the `mezel.json` file.
 To see what flags are available, you can run the binary with the `--help` flag:
