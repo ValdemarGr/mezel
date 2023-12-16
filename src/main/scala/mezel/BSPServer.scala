@@ -364,12 +364,13 @@ class BspServerOps(
       ds <- readDependencySources
     } yield Some {
       DependencySourcesResult {
-        ds.toList.map { case (label, ds) =>
-          DependencySourcesItem(
-            buildIdent(label),
-            ds.sourcejars.map(x => pathToUri(execRoot / x)).toList
-          )
-        }
+        DependencySourcesItem(BuildTargetIdentifier(SafeUri("workspace")), Nil) ::
+          ds.toList.map { case (label, ds) =>
+            DependencySourcesItem(
+              buildIdent(label),
+              ds.sourcejars.map(x => pathToUri(execRoot / x)).toList
+            )
+          }
       }.asJson
     }
 
@@ -488,11 +489,11 @@ class BspServerOps(
               SourcesItem(
                 buildIdent(label),
                 xs.map(SourceItem(_, SourceItemKind.File, false)),
-                Nil
+                List(wsr)
               )
             }
         }
-        .map(ss => Some(SourcesResult(ss).asJson))
+        .map(ss => Some(SourcesResult(SourcesItem(BuildTargetIdentifier(SafeUri("workspace")), Nil, Nil) :: ss).asJson))
     } yield out
 
   def scalacOptions(targets: List[SafeUri]): IO[Option[Json]] =
@@ -545,37 +546,53 @@ class BspServerOps(
       }
       bts <- readBuildTargets
     } yield WorkspaceBuildTargetsResult {
-      bts.toList.map { case (label, bt) =>
-        BuildTarget(
-          id = buildIdent(label),
-          displayName = Some(label),
-          baseDirectory = Some(pathFullToUri(wsr, Path(bt.directory))),
-          tags = List("library"),
-          languageIds = List("scala"),
-          dependencies = bt.deps.map(buildIdent),
-          capabilities = BuildTargetCapabilities(
-            canCompile = Some(true),
-            canTest = Some(false),
-            canRun = Some(false),
-            canDebug = Some(false)
-          ),
-          dataKind = Some("scala"),
-          data = Some {
-            ScalaBuildTarget(
-              scalaOrganization = "org.scala-lang",
-              scalaVersion = bt.compilerVersion.toVersion,
-              scalaBinaryVersion = s"${bt.compilerVersion.major}.${bt.compilerVersion.minor}",
-              platform = 1,
-              jars = bt.scalaCompilerClasspath.map(x => pathToUri(execRoot / x)),
-              jvmBuildTarget = Some {
-                JvmBuildTarget(
-                  javaHome = Some(pathToUri(execRoot / bt.javaHome)),
-                  javaVersion = None
-                )
-              }
-            )
-          }
-        )
-      }
+      BuildTarget(
+        id = BuildTargetIdentifier(SafeUri("workspace")),
+        displayName = Some("workspace"),
+        baseDirectory = Some(wsr),
+        tags = Nil,
+        languageIds = Nil,
+        dependencies = Nil,
+        capabilities = BuildTargetCapabilities(
+          canCompile = Some(false),
+          canTest = Some(false),
+          canRun = Some(false),
+          canDebug = Some(false)
+        ),
+        dataKind = None,
+        data = None
+      ) ::
+        bts.toList.map { case (label, bt) =>
+          BuildTarget(
+            id = buildIdent(label),
+            displayName = Some(label),
+            baseDirectory = Some(pathFullToUri(wsr, Path(bt.directory))),
+            tags = List("library"),
+            languageIds = List("scala"),
+            dependencies = bt.deps.map(buildIdent),
+            capabilities = BuildTargetCapabilities(
+              canCompile = Some(true),
+              canTest = Some(false),
+              canRun = Some(false),
+              canDebug = Some(false)
+            ),
+            dataKind = Some("scala"),
+            data = Some {
+              ScalaBuildTarget(
+                scalaOrganization = "org.scala-lang",
+                scalaVersion = bt.compilerVersion.toVersion,
+                scalaBinaryVersion = s"${bt.compilerVersion.major}.${bt.compilerVersion.minor}",
+                platform = 1,
+                jars = bt.scalaCompilerClasspath.map(x => pathToUri(execRoot / x)),
+                jvmBuildTarget = Some {
+                  JvmBuildTarget(
+                    javaHome = Some(pathToUri(execRoot / bt.javaHome)),
+                    javaVersion = None
+                  )
+                }
+              )
+            }
+          )
+        }
     }.asJson.some
 }
