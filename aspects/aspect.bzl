@@ -64,26 +64,22 @@ def _mezel_aspect(target, ctx):
     fail("Expected exactly one output class jar, got {}".format(output_class_jars))
   output_class_jar = output_class_jars[0]
 
+  def non_self(file):
+    return file.owner != target.label
+
+  def external_dep(file):
+    return file.owner not in ignore
+
+  def depcheck(file):
+    return non_self(file) and external_dep(file)
+
   transitive_compile_jars = target[JavaInfo].transitive_compile_time_jars.to_list()
-  cp_jars = [x.path for x in transitive_compile_jars if x.owner != target.label]
+  cp_jars = [x.path for x in transitive_compile_jars if non_self(x)]
   transitive_source_jars = target[JavaInfo].transitive_source_jars.to_list()
-  src_jars = [x.path for x in transitive_source_jars if x.owner not in ignore]
+  src_jars = [x.path for x in transitive_source_jars if depcheck(x)]
 
   raw_plugins = attrs.plugins if attrs.plugins else []
   plugins = [y.path for x in raw_plugins if JavaInfo in x for y in x[JavaInfo].compile_jars.to_list()]
-
-  # semanticdb_cache = ctx.actions.declare_directory("{}_semanticdb_cache".format(target.label.name))
-  # ctx.actions.run_shell(
-  #   inputs = target.files.to_list(),
-  #   outputs = [semanticdb_cache],
-  #   command = """ls -lAh {}/.. && if [ -z "$(ls -A {}/**/*.semanticdb)" ]; then true; else cp -r {} {}; fi""".format(
-  #     target.files.to_list()[0].root.path,
-  #     semanticdb_target_root, 
-  #     semanticdb_target_root, 
-  #     semanticdb_cache.path
-  #   ),
-  #   mnemonic = "CopySemanticdbCache"
-  # )
 
   scalac_options_file = ctx.actions.declare_file("{}_bsp_scalac_options.json".format(target.label.name))
   scalac_options_content = struct(
@@ -124,10 +120,8 @@ def _mezel_aspect(target, ctx):
     inputs = [scalac_options_file, sources_file, dependency_sources_file, build_target_file]
   )
 
-  # extra = "" if ctx.label.workspace_root.endswith("/") else "/"
   files = struct(
     label = target.label,
-    # target_dir = ctx.label.workspace_root + extra + ctx.label.package
     transitive_labels = transitive_labels,
   )
 
@@ -136,26 +130,26 @@ def _mezel_aspect(target, ctx):
     for x in attrs.deps if OutputGroupInfo in x and hasattr(x[OutputGroupInfo], "bsp_info")
   ]
 
+  transitive_info_deps = [
+    target[JavaInfo].transitive_compile_time_jars,
+    target[JavaInfo].transitive_source_jars
+  ] + [x[JavaInfo].compile_jars for x in raw_plugins]
+
+  # this is bad practice (depset materialization)
+  # but I need to filter in the transitive outputs to remove scala labels to avoid forcing
+  # builds when querying the bsp info
+  bsp_info_deps = depset(
+    [x for x in scala_compile_classpath if depcheck(x)],
+    transitive = [depset([x for x in xs.to_list() if depcheck(x)]) for xs in transitive_info_deps]
+  )
+
   return [
     OutputGroupInfo(
       bsp_info = depset(
         [scalac_options_file, sources_file, dependency_sources_file, build_target_file],
         transitive = transitive_output_files
       ),
-      # bsp_semanticdb_cache = depset(
-      #   [semanticdb_cache],
-      #   transitive = [
-      #     x[OutputGroupInfo].bsp_semanticdb_cache
-      #     for x in attrs.deps if OutputGroupInfo in x and hasattr(x[OutputGroupInfo], "bsp_semanticdb_cache")
-      #   ]
-      # ),
-      bsp_info_deps = depset(
-        scala_compile_classpath,
-        transitive = [
-          target[JavaInfo].transitive_compile_time_jars,
-          target[JavaInfo].transitive_source_jars
-        ] + [x[JavaInfo].compile_jars for x in raw_plugins]
-      )
+      bsp_info_deps = bsp_info_deps,
     ),
     BuildTargetInfo(output = files)
   ]

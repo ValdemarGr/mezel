@@ -99,7 +99,7 @@ class Tasks(
   def diagnosticsFiles: IO[Seq[(String, Path)]] = trace.trace("diagnosticsFiles") {
     import dsl._
 
-    api.aquery(mnemonic("Scalac")("...")).map { aq =>
+    api.aquery(union(mnemonic("Scalac")("..."))(mnemonic("FileWrite")("..."))).map { aq =>
       val ext = ActionQueryResultExtensions(aq)
       aq.actions.mapFilter { a =>
         val label = ext.targetMap(a.targetId)
