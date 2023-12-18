@@ -18,6 +18,7 @@ import com.google.devtools.build.lib.analysis.analysis_v2.PathFragment
 import fs2.concurrent.Channel
 import _root_.io.bazel.rules_scala.diagnostics.diagnostics
 import cats.effect.std.Supervisor
+import cats.effect.std.Mutex
 
 enum BspResponseError(val code: Int, val message: String, val data: Option[Json] = None):
   case NotInitialized extends BspResponseError(-32002, "Server not initialized")
@@ -169,9 +170,23 @@ class BspServerOps(
     buildArgs: List[String],
     aqueryArgs: List[String],
     logger: Logger,
-    trace: Trace
+    trace: Trace,
+    mutex: Mutex[IO]
 )(implicit R: Raise[IO, BspResponseError]) {
   import _root_.io.circe.syntax.*
+
+  def evalModify[A](f: BspState => IO[(BspState, A)]): IO[A] =
+    mutex.lock.surround {
+      state.get.flatMap(f).flatMap { case (s, x) => state.set(s) as x }
+    }
+
+  def cached[A](get: BspState => Option[A], set: BspState => A => BspState)(run: => IO[A]): IO[A] =
+    evalModify { s =>
+      get(s) match {
+        case Some(x) => IO.pure((s, x))
+        case None    => run.map(x => (set(s)(x), x))
+      }
+    }
 
   // for now we just compile
   // TODO, we can stream the results out into json
@@ -235,25 +250,16 @@ class BspServerOps(
     }
 
   def derivedEnv: IO[Map[String, String]] =
-    state.get.map(_.derivedEnvCache).flatMap {
-      case Some(cached) => IO.pure(cached)
-      case None =>
-        workspaceRoot
-          .flatMap(mkTasks)
-          .flatMap(_.api.info)
-          .flatTap(x => state.update(_.copy(derivedEnvCache = Some(x))))
+    cached(_.derivedEnvCache, s => x => s.copy(derivedEnvCache = Some(x))) {
+      workspaceRoot.flatMap(mkTasks).flatMap(_.api.info)
     }
 
   def derivedExecRoot: IO[Path] =
     derivedEnv.map(_.apply("execution_root")).map(Path(_))
 
   def diagnosticsFiles =
-    state.get.map(_.diagnosticsFilesCache).flatMap {
-      case Some(cached) => IO.pure(cached)
-      case None =>
-        tasks
-          .flatMap(_.diagnosticsFiles.map(_.toMap))
-          .flatTap(x => state.update(_.copy(diagnosticsFilesCache = Some(x))))
+    cached(_.diagnosticsFilesCache, s => x => s.copy(diagnosticsFilesCache = Some(x))) {
+      tasks.flatMap(_.diagnosticsFiles.map(_.toMap))
     }
 
   def cacheFolder: IO[Path] =
@@ -264,24 +270,27 @@ class BspServerOps(
   def sendNotification[A: Encoder](method: String, params: A): IO[Unit] =
     output.send(Notification("2.0", method, Some(params.asJson)).asJson).void
 
-  def cacheSemanticdbPath(execRoot: Path, cache: Path, targetroot: String): IO[Unit] = {
-    val actualDir = execRoot / Path(targetroot)
-    val cacheDir = cache / "semanticdb" / targetroot
+  def semanticdbCachePath(targetroot: String): IO[Path] =
+    derivedExecRoot.map(_ / "semanticdb" / targetroot)
 
-    val ls = Files[IO].walk(actualDir).evalFilterNot(Files[IO].isDirectory)
+  def cacheSemanticdbPath(execRoot: Path, targetroot: String): IO[Unit] =
+    semanticdbCachePath(targetroot).flatMap { cacheDir =>
+      val actualDir = execRoot / Path(targetroot)
 
-    Files[IO].exists(cacheDir).flatMap {
-      case true  => Files[IO].deleteRecursively(cacheDir)
-      case false => IO.unit
-    } *>
-      ls.evalMap { p =>
-        val fileRelativeToTargetRoot = actualDir.absolute.relativize(p.absolute)
-        val targetFile = cacheDir / fileRelativeToTargetRoot
-        targetFile.parent.traverse_(Files[IO].createDirectories) *>
-          Files[IO].copy(p.absolute, targetFile, CopyFlags(CopyFlag.ReplaceExisting))
-      }.compile
-        .drain
-  }
+      val ls = Files[IO].walk(actualDir).evalFilterNot(Files[IO].isDirectory)
+
+      Files[IO].exists(cacheDir).flatMap {
+        case true  => Files[IO].deleteRecursively(cacheDir)
+        case false => IO.unit
+      } *>
+        ls.evalMap { p =>
+          val fileRelativeToTargetRoot = actualDir.absolute.relativize(p.absolute)
+          val targetFile = cacheDir / fileRelativeToTargetRoot
+          targetFile.parent.traverse_(Files[IO].createDirectories) *>
+            Files[IO].copy(p.absolute, targetFile, CopyFlags(CopyFlag.ReplaceExisting))
+        }.compile
+          .drain
+    }
 
   def mkTasks(rootUri: SafeUri) = {
     outputBaseFromSource.map { ob =>
@@ -448,7 +457,7 @@ class BspServerOps(
                   Files[IO].exists(execRoot / Path(sco.targetroot)).flatMap {
                     case false =>
                       trace.logger.logWarn(s"no semanticdb targetroot for $label, this is likely a bug")
-                    case true => cacheSemanticdbPath(execRoot, cacheDir, sco.targetroot)
+                    case true => cacheSemanticdbPath(execRoot, sco.targetroot)
                   }
                 }
               } else IO.unit
@@ -493,7 +502,7 @@ class BspServerOps(
               )
             }
         }
-        .map(ss => Some(SourcesResult(SourcesItem(BuildTargetIdentifier(SafeUri("workspace")), Nil, Nil) :: ss).asJson))
+        .map(ss => Some(SourcesResult(SourcesItem(BuildTargetIdentifier(SafeUri("workspace")), Nil, List(wsr)) :: ss).asJson))
     } yield out
 
   def scalacOptions(targets: List[SafeUri]): IO[Option[Json]] =
@@ -502,11 +511,8 @@ class BspServerOps(
       scos <- readScalacOptions
       execRoot <- derivedExecRoot
       cacheDir <- cacheFolder
-    } yield Some {
-      ScalacOptionsResult {
-        scos.toList.map { case (label, sco) =>
-          val semanticdbDir = cacheDir / sco.targetroot
-
+      options <- scos.toList.traverse { case (label, sco) =>
+        semanticdbCachePath(sco.targetroot).map { semanticdbDir =>
           val semanticDBFlags =
             if (sco.compilerVersion.major === 2) {
               List(
@@ -529,20 +535,15 @@ class BspServerOps(
             (execRoot / sco.outputClassJar).toNioPath.toUri().toString()
           )
         }
-      }.asJson
-    }
+      }
+    } yield Some(ScalacOptionsResult(options).asJson)
 
   def buildTargets: IO[Option[Json]] =
     for {
       wsr <- workspaceRoot
       execRoot <- derivedExecRoot
-      currentBtc <- state.get.map(_.buildTargetCache)
-      _ <- currentBtc match {
-        case Some(x) => IO.unit
-        case None =>
-          tasks.flatMap(_.buildTargetCache(execRoot)).flatTap { btc =>
-            state.update(_.copy(buildTargetCache = Some(btc)))
-          }
+      _ <- cached(_.buildTargetCache, s => x => s.copy(buildTargetCache = Some(x))) {
+        tasks.flatMap(_.buildTargetCache(execRoot))
       }
       bts <- readBuildTargets
     } yield WorkspaceBuildTargetsResult {
