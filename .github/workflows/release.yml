@@ -17,8 +17,6 @@ jobs:
       - uses: DeterminateSystems/magic-nix-cache-action@main
       - run: nix flake check
       - run: nix develop --command sbt root/assembly
-      - run: cp target/mezel.jar mezel.jar
-        if: startsWith(github.ref, 'refs/tags/v')
       - run: echo "DERIVED_VERSION=release-${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
         id: version
         if: startsWith(github.ref, 'refs/tags/v')
@@ -30,7 +28,7 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
 
-          ARTIFACT_HASH=$(nix-hash --flat --type sha256 mezel.jar)
+          ARTIFACT_HASH=$(nix-hash --flat --type sha256 target/mezel.jar)
           sed -i "s|sha256.*$|sha256 = \"${ARTIFACT_HASH}\"|" rules/load_mezel.bzl
           sed -i "s|version.*$|version = \"${DERIVED_VERSION}\"|" rules/load_mezel.bzl
 
@@ -57,4 +55,4 @@ jobs:
         with:
           tag_name: ${{ steps.version.outputs.DERIVED_VERSION }}
           files: |
-            mezel.jar
+            target/mezel.jar
