@@ -40,4 +40,4 @@ jobs:
           git add README.md
           git add rules/load_mezel.bzl
           git commit -m "automatic update of mezel to ${VERSION}"
-          git push
+          git push origin HEAD:main
