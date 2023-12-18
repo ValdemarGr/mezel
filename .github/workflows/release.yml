@@ -29,8 +29,8 @@ jobs:
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
 
           ARTIFACT_HASH=$(nix-hash --flat --type sha256 target/mezel.jar)
-          sed -i "s|sha256.*$|sha256 = \"${ARTIFACT_HASH}\"|" rules/load_mezel.bzl
-          sed -i "s|version.*$|version = \"${DERIVED_VERSION}\"|" rules/load_mezel.bzl
+          sed -i "s|sha256 =.*$|sha256 = \"${ARTIFACT_HASH}\",|" rules/load_mezel.bzl
+          sed -i "s|version =.*$|version = \"${DERIVED_VERSION}\"|" rules/load_mezel.bzl
 
           git add rules/load_mezel.bzl
           git commit -m "automatic update of mezel artifact location to ${{ github.ref_name }}"
@@ -45,7 +45,7 @@ jobs:
           REPO_HASH=$(nix-hash --flat --type sha256 /tmp/mezel.zip)
           README_SHA_LINE_NUM=$(expr $(grep -n -m 1 "name = \"mezel\"" README.md | grep -o -P "\d*") + 1)
           sed -i "${README_SHA_LINE_NUM}s|sha256.*$|sha256 = \"${REPO_HASH}\",|" README.md
-          sed -i "s|mezel_version.*$|mezel_version = \"${ARTIFACT_COMMIT_HASH}\"|" README.md
+          sed -i "s|mezel_version =.*$|mezel_version = \"${ARTIFACT_COMMIT_HASH}\"|" README.md
 
           git add README.md
           git commit -m "automatic update of mezel docs for ${{ github.ref_name }}"
