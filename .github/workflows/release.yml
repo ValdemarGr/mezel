@@ -33,8 +33,9 @@ jobs:
           URL="${{ github.server_url }}/${{ github.repository }}/archive/refs/tags/${{ github.ref_name }}.zip"
           nix-shell -p wget --command "wget ${URL} -O /tmp/mezel.zip"
           REPO_HASH=$(nix-hash --flat --type sha256 /tmp/mezel.zip)
-          README_LINE_NUM=$(expr $(grep -n -m 1 "name = \"mezel\"" README.md | grep -o -P "\d*") + 1)
-          sed -i "${README_LINE_NUM}s|sha256.*$|sha256 = \"${REPO_HASH}\",|" README.md
+          README_SHA_LINE_NUM=$(expr $(grep -n -m 1 "name = \"mezel\"" README.md | grep -o -P "\d*") + 1)
+          sed -i "${README_SHA_LINE_NUM}s|sha256.*$|sha256 = \"${REPO_HASH}\",|" README.md
+          sed -i "s|mezel_version.*$|mezel_version = \"${{ github.sha }}\"|" README.md
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git add README.md
