@@ -18,8 +18,24 @@ jobs:
       - run: nix flake check
       - run: nix develop --command sbt root/assembly
       - run: cp target/mezel.jar mezel.jar
-      - uses: softprops/action-gh-release@v1
+      - uses: actions/upload-artifact@v4
         if: startsWith(github.ref, 'refs/tags/v')
         with:
-          files: |
-            mezel.jar
+          path: mezel.jar
+          name: mezel.jar
+      - if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          ARTIFACT_HASH=$(nix-hash --flat --type sha256 mezel.jar)
+          VERSION=${{github.ref_name}}
+          sed -i "s|sha256.*$|sha256 = \"${ARTIFACT_HASH}\"|" rules/load_mezel.bzl
+          URL="${{ github.server_url }}/${{ github.repository }}/archive/refs/tags/${{ github.ref_name }}.zip"
+          nix-shell -p wget --command "wget ${URL} -O /tmp/mezel.zip"
+          REPO_HASH=$(nix-hash --flat --type sha256 /tmp/mezel.zip)
+          README_LINE_NUM=$(expr $(grep -n -m 1 "name = \"mezel\"" README.md | grep -o -P "\d*") + 1)
+          sed -i "${README_LINE_NUM}s/sha256.*$/sha256 = \"${REPO_HASH}\","
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add README.md
+          git add rules/load_mezel.bzl
+          git commit -m "automatic update of mezel to ${VERSION}"
+          git push
