@@ -1,10 +1,10 @@
 name: Release
 
 on:
-  push:
-    branches:
-      - main
-    tags: [v*]
+  - push:
+      branches:
+        - main
+      tags: [v*]
 
 jobs:
   build:
@@ -19,28 +19,40 @@ jobs:
       - run: nix develop --command sbt root/assembly
       - run: cp target/mezel.jar mezel.jar
         if: startsWith(github.ref, 'refs/tags/v')
-      - uses: actions/upload-artifact@v4
+      - run: echo "::set-env name=DERIVED_VERSION::release-${{ github.ref_name }}"
         if: startsWith(github.ref, 'refs/tags/v')
-        with:
-          path: mezel.jar
-          name: mezel.jar
-      - if: startsWith(github.ref, 'refs/tags/v')
-        name: Update the docs
+      - name: Update the docs
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          DERIVED_VERSION: ${{ env.DERIVED_VERSION }}
         run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
           ARTIFACT_HASH=$(nix-hash --flat --type sha256 mezel.jar)
-          VERSION=${{github.ref_name}}
           sed -i "s|sha256.*$|sha256 = \"${ARTIFACT_HASH}\"|" rules/load_mezel.bzl
-          URL="${{ github.server_url }}/${{ github.repository }}/archive/refs/tags/${{ github.ref_name }}.zip"
+
+          git add rules/load_mezel.bzl
+          git commit -m "automatic update of mezel artifact location to ${{ github.ref_name }}"
+          ARTIFACT_COMMIT_HASH=$(git rev-parse HEAD)
+          git push origin HEAD:main
+
+          git tag -a $DERIVED_VERSION -m "Release ${{ github.ref_name }}"
+          git push origin --tags
+
+          URL="${{ github.server_url }}/${{ github.repository }}/archive/${ARTIFACT_COMMIT_HASH}.zip"
           nix-shell -p wget --command "wget ${URL} -O /tmp/mezel.zip"
           REPO_HASH=$(nix-hash --flat --type sha256 /tmp/mezel.zip)
           README_SHA_LINE_NUM=$(expr $(grep -n -m 1 "name = \"mezel\"" README.md | grep -o -P "\d*") + 1)
           sed -i "${README_SHA_LINE_NUM}s|sha256.*$|sha256 = \"${REPO_HASH}\",|" README.md
-          sed -i "s|mezel_version.*$|mezel_version = \"${{ github.sha }}\"|" README.md
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          sed -i "s|mezel_version.*$|mezel_version = \"${ARTIFACT_COMMIT_HASH}\"|" README.md
+
           git add README.md
-          git add rules/load_mezel.bzl
-          git commit -m "automatic update of mezel to ${VERSION}"
+          git commit -m "automatic update of mezel docs for ${{ github.ref_name }}"
           git push origin HEAD:main
       - if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ env.DERIVED_VERSION }}
+          files: |
+            mezel.jar
