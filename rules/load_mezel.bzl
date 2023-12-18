@@ -5,5 +5,5 @@ def load_mezel():
   http_jar(
       name = "mezel_binary",
       url = "https://github.com/valdemargr/mezel/releases/download/{}/{}".format(version, "mezel.jar"),
-      sha256 = "6f6d32136f1ccf809416672cec21f3ed2950bb740f420e709d2b372a8eccab9b"
+      sha256 = "74b1ff521642594903f7c10cf2cc1e41010ce9f84e0b0ed2e8ab1c3db78dde7f"
   )

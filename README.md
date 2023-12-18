@@ -91,7 +91,7 @@ Mezel needs an aspect to work, so add the following to your `WORKSPACE` file to 
 mezel_version = "dafa2817ccd23b7c70683a6061558436cfbd8f23"  # update this as needed
 http_archive(
     name = "mezel",
-    sha256 = "35f2b8fae97448cf194bcf08156b733b972e44be3b11b1ad091be1e42cfad2a1",
+    sha256 = "95be1207dae8fd0568a2a4120bd4d0a03b4cf9a3b2d3e82c775f38d6566969da",
     strip_prefix = "mezel-%s" % mezel_version,
     type = "zip",
     url = "https://github.com/valdemargr/mezel/archive/%s.zip" % mezel_version,
