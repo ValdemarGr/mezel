@@ -40,7 +40,7 @@ jobs:
           git push origin HEAD:main
 
           git tag -a $DERIVED_VERSION -m "Release ${{ github.ref_name }}"
-          git push origin --tags
+          git push origin refs/tags/$DERIVED_VERSION
 
           URL="${{ github.server_url }}/${{ github.repository }}/archive/${ARTIFACT_COMMIT_HASH}.zip"
           nix-shell -p wget --command "wget ${URL} -O /tmp/mezel.zip"
