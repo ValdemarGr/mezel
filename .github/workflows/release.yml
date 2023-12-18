@@ -41,3 +41,5 @@ jobs:
           git add rules/load_mezel.bzl
           git commit -m "automatic update of mezel to ${VERSION}"
           git push origin HEAD:main
+      - if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v1
