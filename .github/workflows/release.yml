@@ -19,18 +19,20 @@ jobs:
       - run: nix develop --command sbt root/assembly
       - run: cp target/mezel.jar mezel.jar
         if: startsWith(github.ref, 'refs/tags/v')
-      - run: echo "::set-env name=DERIVED_VERSION::release-${{ github.ref_name }}"
+      - run: echo "DERIVED_VERSION=release-${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+        id: version
         if: startsWith(github.ref, 'refs/tags/v')
       - name: Update the docs
         if: startsWith(github.ref, 'refs/tags/v')
         env:
-          DERIVED_VERSION: ${{ env.DERIVED_VERSION }}
+          DERIVED_VERSION: ${{ steps.version.outputs.DERIVED_VERSION }}
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
 
           ARTIFACT_HASH=$(nix-hash --flat --type sha256 mezel.jar)
           sed -i "s|sha256.*$|sha256 = \"${ARTIFACT_HASH}\"|" rules/load_mezel.bzl
+          sed -i "s|version.*$|version = \"${DERIVED_VERSION}\"|" rules/load_mezel.bzl
 
           git add rules/load_mezel.bzl
           git commit -m "automatic update of mezel artifact location to ${{ github.ref_name }}"
@@ -53,6 +55,6 @@ jobs:
       - if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: ${{ env.DERIVED_VERSION }}
+          tag_name: ${{ steps.version.outputs.DERIVED_VERSION }}
           files: |
             mezel.jar
