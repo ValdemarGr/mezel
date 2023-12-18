@@ -18,12 +18,14 @@ jobs:
       - run: nix flake check
       - run: nix develop --command sbt root/assembly
       - run: cp target/mezel.jar mezel.jar
+        if: startsWith(github.ref, 'refs/tags/v')
       - uses: actions/upload-artifact@v4
         if: startsWith(github.ref, 'refs/tags/v')
         with:
           path: mezel.jar
           name: mezel.jar
       - if: startsWith(github.ref, 'refs/tags/v')
+        name: Update the docs
         run: |
           ARTIFACT_HASH=$(nix-hash --flat --type sha256 mezel.jar)
           VERSION=${{github.ref_name}}
