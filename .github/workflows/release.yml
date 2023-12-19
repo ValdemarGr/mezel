@@ -25,6 +25,7 @@ jobs:
         env:
           DERIVED_VERSION: ${{ steps.version.outputs.DERIVED_VERSION }}
         run: |
+          git fetch origin main
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git rebase main HEAD
