@@ -28,7 +28,7 @@ jobs:
           git fetch origin main
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git rebase main HEAD
+          git rebase origin/main
 
           ARTIFACT_HASH=$(nix-hash --flat --type sha256 target/mezel.jar)
           sed -i "s|sha256 =.*$|sha256 = \"${ARTIFACT_HASH}\",|" rules/load_mezel.bzl
