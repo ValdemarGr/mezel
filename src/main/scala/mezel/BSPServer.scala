@@ -104,11 +104,15 @@ object BspState {
 }
 
 def convertDiagnostic(
+    lg: Logger,
     root: SafeUri,
     target: BuildTargetIdentifier,
     tds: diagnostics.TargetDiagnostics
-): List[PublishDiagnosticsParams] = {
-  tds.diagnostics.groupBy(_.path).toList.map { case (p, fds) =>
+): IO[List[PublishDiagnosticsParams]] = {
+  // If the path contains "no file" then we cannot convert it to a URI
+  // so we just ignore and log it
+  // https://github.com/ValdemarGr/mezel/issues/21
+  tds.diagnostics.groupBy(_.path).toList.flatTraverse { case (p, fds) =>
     val ds = fds.flatMap(_.diagnostics).toList.map { d =>
       val rng = d.range.get
       val start = rng.start.get
@@ -153,13 +157,20 @@ def convertDiagnostic(
     }
 
     val fixedTextDocumentRef = p.replace("workspace-root://", "")
-    PublishDiagnosticsParams(
+    val pdp = PublishDiagnosticsParams(
       textDocument = TextDocumentIdentifier(pathFullToUri(root, Path(fixedTextDocumentRef))),
       buildTarget = target,
       originId = None,
       diagnostics = ds,
       reset = true
     )
+
+    import _root_.io.circe.syntax._
+    if (p.contains("no file")) {
+      lg.logWarn(
+        s"path $p contains \"no file\", which the Scala compiler can do sometimes. Ignoring the diagnostic, here is a dump of the output: ${pdp.asJson.noSpaces}"
+      ).as(Nil)
+    } else IO.pure(List(pdp))
   }
 }
 
@@ -439,14 +450,15 @@ class BspServerOps(
             // if there are diagnostics for a target, publish them
             def publishDiag: IO[Unit] = readDiagnostics.flatMap { tdOpt =>
               val bti = buildIdent(label)
-              val xs = tdOpt.toList.flatMap(convertDiagnostic(wsr, bti, _))
-              val prevHere = prevDiagnostics.get(bti).toList.flatten
-              val toClear = prevHere.toSet -- xs.map(_.textDocument)
+              tdOpt.toList.flatTraverse(convertDiagnostic(trace.logger, wsr, bti, _)).flatMap { xs =>
+                val prevHere = prevDiagnostics.get(bti).toList.flatten
+                val toClear = prevHere.toSet -- xs.map(_.textDocument)
 
-              xs.traverse(x => publishDiagnostics(x) *> cacheDiagnostic(bti, x.textDocument)) *>
-                toClear.toList
-                  .map(PublishDiagnosticsParams(_, bti, None, Nil, true))
-                  .traverse_(publishDiagnostics)
+                xs.traverse(x => publishDiagnostics(x) *> cacheDiagnostic(bti, x.textDocument)) *>
+                  toClear.toList
+                    .map(PublishDiagnosticsParams(_, bti, None, Nil, true))
+                    .traverse_(publishDiagnostics)
+              }
             }
 
             // if success then there are semanticdb files to publish
