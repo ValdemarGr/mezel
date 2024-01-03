@@ -146,3 +146,16 @@ To get around this, tell bazel to ignore the symlink when running bazel operatio
 ```bash
 echo "bazel-$(basename $PWD)" >> .bazelignore
 ```
+
+### Metals configuration (optional)
+For larger projects, some operations can take longer than Metals (by default) will wait for a response before timing out.
+
+mezel is not supposed to deadlock or become stuck, if this ever occurs it is a bug.
+
+I suggest turning off the reconnection feature of Metals and enabling debug logging:
+```
+-Dmetals.verbose=true
+-Dmetals.askToReconnect=false
+-Dmetals.loglevel=debug
+-Dmetals.build-server-ping-interval=10h
+```
