@@ -18,7 +18,6 @@ import com.google.devtools.build.lib.analysis.analysis_v2.PathFragment
 import fs2.concurrent.Channel
 import _root_.io.bazel.rules_scala.diagnostics.diagnostics
 import cats.effect.std.Supervisor
-import cats.effect.std.Mutex
 
 enum BspResponseError(val code: Int, val message: String, val data: Option[Json] = None):
   case NotInitialized extends BspResponseError(-32002, "Server not initialized")
@@ -106,14 +105,16 @@ final case class DependencyGraph(
 }
 
 final case class BspState(
-    workspaceRoot: Option[SafeUri],
+    initReq: Option[InitializeBuildParams],
     sourceEnv: Option[Map[String, String]],
     derivedEnvCache: Option[Map[String, String]],
     buildTargetCache: Option[BuildTargetCache],
     diagnosticsFilesCache: Option[Map[String, Path]],
     dependencyGraph: Option[DependencyGraph] = None,
     prevDiagnostics: Map[BuildTargetIdentifier, List[TextDocumentIdentifier]] = Map.empty
-)
+) {
+  def workspaceRoot: Option[SafeUri] = initReq.map(_.rootUri)
+}
 
 def tmpRoot = IO.delay(System.getProperty("java.io.tmpdir")).map(Path(_))
 
@@ -214,15 +215,12 @@ class BspServerOps(
     buildArgs: List[String],
     aqueryArgs: List[String],
     logger: Logger,
-    trace: Trace,
-    mutex: Mutex[IO]
+    trace: Trace
 )(implicit R: Raise[IO, BspResponseError]) {
   import _root_.io.circe.syntax.*
 
   def evalModify[A](f: BspState => IO[(BspState, A)]): IO[A] =
-    mutex.lock.surround {
-      state.get.flatMap(f).flatMap { case (s, x) => state.set(s) as x }
-    }
+    state.get.flatMap(f).flatMap { case (s, x) => state.set(s) as x }
 
   def cached[A](get: BspState => Option[A], set: BspState => A => BspState)(run: => IO[A]): IO[A] =
     evalModify { s =>
@@ -237,7 +235,7 @@ class BspServerOps(
   def readBuildTargetCache[A](f: BuildTargetCache => Stream[IO, (String, A)]): IO[List[(String, A)]] = {
     val fa = for {
       curr <- Stream.eval(state.get)
-      btc <- Stream.eval(R.fromOption(BspResponseError.NotInitialized)(curr.buildTargetCache))
+      btc <- Stream.eval(buildTargetCache)
       res <- f(btc)
     } yield res
 
@@ -267,7 +265,14 @@ class BspServerOps(
     }
 
   def dependencyGraph: IO[DependencyGraph] =
-    state.get.flatMap(x => IO.fromOption(x.dependencyGraph)(new Exception("no dependency graph")))
+    cached(_.dependencyGraph, s => x => s.copy(dependencyGraph = Some(x))) {
+      readBuildTargets.map(bts => DependencyGraph(bts.map { case (k, v) => k -> v.deps }.toMap))
+    }
+
+  def buildTargetCache: IO[BuildTargetCache] =
+    cached(_.buildTargetCache, s => x => s.copy(buildTargetCache = Some(x))) {
+      derivedExecRoot.flatMap(execRoot => tasks.flatMap(_.buildTargetCache(execRoot)))
+    }
 
   def prevDiagnostics: IO[Map[BuildTargetIdentifier, List[TextDocumentIdentifier]]] =
     state.modify(s => s.copy(prevDiagnostics = Map.empty) -> s.prevDiagnostics)
@@ -354,7 +359,7 @@ class BspServerOps(
         else
           BazelAPI(uriToPath(msg.rootUri), buildArgs, aqueryArgs, logger, trace, None).info.flatMap { env =>
             trace.logger.logInfo(s"running with bazel env $env") >>
-              state.update(_.copy(workspaceRoot = Some(msg.rootUri), sourceEnv = Some(env))) <*
+              state.update(_.copy(initReq = Some(msg), sourceEnv = Some(env))) <*
               derivedEnv.flatMap(env => trace.logger.logInfo(s"derived env which mezel will run in $env"))
           }
       } >> {
@@ -406,7 +411,7 @@ class BspServerOps(
                 buildTargetChangedProvider = Some(true),
                 jvmRunEnvironmentProvider = Some(true),
                 jvmTestEnvironmentProvider = Some(true),
-                canReload = Some(false) // what does this mean?
+                canReload = Some(false)
               )
             ).asJson
           }
@@ -458,39 +463,37 @@ class BspServerOps(
           }
 
           val labelStream =
-            Stream.eval(trace.logger.logInfo("rab\n" + dg.ancestors.mkString("\n") + "\nlol\n" + dg.parents.mkString("\n"))) *>
-              Stream.eval(IO.ref[Set[String]](Set.empty)).flatMap { eliminatedRef =>
-                trace
-                  .traceStream("parse bazel BEP") {
-                    parseBEP(tmp)
-                  }
-                  .mapFilter { x =>
-                    for {
-                      comp <- x.payload.completed
-                      id <- x.id
-                      targetCompletedId <- id.id.targetCompleted
-                      label <- Some(targetCompletedId.label).filter(bspLabels.contains)
-                    } yield (label, comp.success)
-                  }
-                  .evalFilter {
-                    case (label, true) => IO.pure(true)
-                    case (label, false) =>
-                      eliminatedRef.get.flatMap { eliminated =>
-                        // we have not been eliminated, but we have failed
-                        // eliminate all our ancestors, but keep this target
-                        if (!eliminated.contains(label)) {
-                          val anc = dg.ancestors.get(label).getOrElse(Set.empty)
-                          trace.logger.logInfo(s"$label failed but is not elimintaed, eliminating ancestors $anc") *>
-                            eliminatedRef.update(_ ++ anc).as(true)
-                        }
-                        // we have been eliminated, a child of ours has failed
-                        // clear all previous diagnostics for this target
-                        else {
-                          diagnosticEffect(buildIdent(label), Nil).as(false)
-                        }
+            Stream.eval(IO.ref[Set[String]](Set.empty)).flatMap { eliminatedRef =>
+              trace
+                .traceStream("parse bazel BEP") {
+                  parseBEP(tmp)
+                }
+                .mapFilter { x =>
+                  for {
+                    comp <- x.payload.completed
+                    id <- x.id
+                    targetCompletedId <- id.id.targetCompleted
+                    label <- Some(targetCompletedId.label).filter(bspLabels.contains)
+                  } yield (label, comp.success)
+                }
+                .evalFilter {
+                  case (label, true) => IO.pure(true)
+                  case (label, false) =>
+                    eliminatedRef.get.flatMap { eliminated =>
+                      // we have not been eliminated, but we have failed
+                      // eliminate all our ancestors, but keep this target
+                      if (!eliminated.contains(label)) {
+                        val anc = dg.ancestors.get(label).getOrElse(Set.empty)
+                        eliminatedRef.update(_ ++ anc).as(true)
                       }
-                  }
-              }
+                      // we have been eliminated, a child of ours has failed
+                      // clear all previous diagnostics for this target
+                      else {
+                        diagnosticEffect(buildIdent(label), Nil).as(false)
+                      }
+                    }
+                }
+            }
 
           labelStream.parEvalMapUnorderedUnbounded { case (label, success) =>
             def readDiagnostics: IO[Option[diagnostics.TargetDiagnostics]] =
@@ -616,13 +619,9 @@ class BspServerOps(
     for {
       wsr <- workspaceRoot
       execRoot <- derivedExecRoot
-      _ <- cached(_.buildTargetCache, s => x => s.copy(buildTargetCache = Some(x))) {
-        tasks.flatMap(_.buildTargetCache(execRoot))
-      }
       bts <- readBuildTargets
-      _ <- cached(_.dependencyGraph, s => x => s.copy(dependencyGraph = Some(x))) {
-        IO.pure(DependencyGraph(bts.map { case (k, v) => k -> v.deps }.toMap))
-      }
+      // force some caches
+      _ <- dependencyGraph
     } yield WorkspaceBuildTargetsResult {
       BuildTarget(
         id = BuildTargetIdentifier(SafeUri("workspace")),
