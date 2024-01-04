@@ -76,18 +76,16 @@ final case class ActionQueryResultExtensions(
 final case class DependencyGraph(
     children: Map[String, List[String]]
 ) {
-  val parents = children.toList
-    .flatMap { case (p, cs) => cs tupleRight p }
-    .groupMap { case (k, _) => k } { case (_, v) => v }
+  val nonRoots = children.values.flatten.toSet
 
-  // def ancestors(label: String): Set[String] = {
-  //   def go(label: String): Eval[Set[String]] = Eval.defer {
-  //     val ps = parents(label).toSet
-  //     ps.unorderedTraverse(go).map(_.unorderedFold)
-  //   }
+  val roots = children.keySet -- nonRoots
 
-  //   go(label).value
-  // }
+  val leaves = children.toList.collect { case (k, Nil) => k }.toSet
+
+  val parents =
+    children.toList
+      .flatMap { case (p, cs) => cs.map(c => c -> p) }
+      .groupMap { case (c, _) => c } { case (_, p) => p } ++ roots.map(_ -> Nil).toMap
 
   val ancestors: Map[String, Set[String]] = {
     def go(label: String): State[Map[String, Set[String]], Set[String]] =
@@ -98,12 +96,12 @@ final case class DependencyGraph(
             val ps = parents(label)
             ps.foldMapA(go).flatMap { transitives =>
               val comb = transitives ++ ps
-              State.modify[Map[String, Set[String]]](_ + (label -> comb)).as(comb)
+              State.modify[Map[String, Set[String]]](_ + (label -> comb)).as(comb + label)
             }
         }
       }
 
-    parents.toList.collect { case (k, Nil) => k }.foldMapA(go).runS(Map.empty).value
+    leaves.toList.foldMapA(go).runS(Map.empty).value
   }
 }
 
@@ -445,95 +443,102 @@ class BspServerOps(
       dg <- Stream.eval(dependencyGraph)
       writeFiles = Stream.eval(readScalacOptions).flatMap { scalacOptions =>
         Stream.eval(readSources).flatMap { sources =>
-          Stream.eval(IO.ref[Set[String]](Set.empty)).flatMap { eliminatedRef =>
-            val nonEmptySources = sources.mapFilter { case (k, v) => Some(k).filter(_ => v.sources.nonEmpty) }.toSet
-            val scalacOptionsMap = scalacOptions.toMap
-            val bspLabels = xs.map { case (id, _) => id }.toSet
+          val nonEmptySources = sources.mapFilter { case (k, v) => Some(k).filter(_ => v.sources.nonEmpty) }.toSet
+          val scalacOptionsMap = scalacOptions.toMap
+          val bspLabels = xs.map { case (id, _) => id }.toSet
 
-            val labelStream =
-              trace
-                .traceStream("parse bazel BEP") {
-                  parseBEP(tmp)
-                }
-                .mapFilter { x =>
-                  for {
-                    comp <- x.payload.completed
-                    id <- x.id
-                    targetCompletedId <- id.id.targetCompleted
-                    label <- Some(targetCompletedId.label).filter(bspLabels.contains)
-                  } yield (label, comp.success)
-                }
-                .evalFilter {
-                  case (label, true) => IO.pure(true)
-                  case (label, false) =>
-                    eliminatedRef.get.flatMap { eliminated =>
-                      // we have not been eliminated, but we have failed
-                      // eliminate all our ancestors, but keep this target
-                      if (!eliminated.contains(label)) {
-                        val anc = dg.ancestors.get(label).getOrElse(Set.empty)
-                        eliminatedRef.update(_ ++ anc).as(true)
-                      }
-                      // we have been eliminated, a child of ours has failed
-                      else {
-                        IO.pure(false)
-                      }
-                    }
-                }
+          def diagnosticEffect(bti: BuildTargetIdentifier, xs: List[PublishDiagnosticsParams]): IO[Unit] = {
+            val prevHere = prevDiagnostics.get(bti).toList.flatten
+            val toClear = prevHere.toSet -- xs.map(_.textDocument)
 
-              labelStream.parEvalMapUnorderedUnbounded { case (label, success) =>
-                def readDiagnostics: IO[Option[diagnostics.TargetDiagnostics]] =
-                  diagnosticsFiles.get(label) match {
-                    case None =>
-                      trace.logger.logInfo(s"no diagnostics file declared for $label, this is likely a bug").as(None)
-                    case Some(x) =>
-                      val p = execRoot / x
+            xs.traverse(x => publishDiagnostics(x) *> cacheDiagnostic(bti, x.textDocument)) *>
+              toClear.toList
+                .map(PublishDiagnosticsParams(_, bti, None, Nil, true))
+                .traverse_(publishDiagnostics)
+          }
 
-                      Files[IO].exists(p).flatMap {
-                        case false =>
-                          trace.logger.logWarn(s"no diagnostics file for $label, this will cause a degraded experience").as(None)
-                        case true =>
-                          Files[IO]
-                            .readAll(p)
-                            .through(fs2.io.toInputStream[IO])
-                            .evalMap(is => IO.blocking(diagnostics.TargetDiagnostics.parseFrom(is)))
-                            .compile
-                            .lastOrError
-                            .map(Some(_))
+          val labelStream =
+            Stream.eval(trace.logger.logInfo("rab\n" + dg.ancestors.mkString("\n") + "\nlol\n" + dg.parents.mkString("\n"))) *>
+              Stream.eval(IO.ref[Set[String]](Set.empty)).flatMap { eliminatedRef =>
+                trace
+                  .traceStream("parse bazel BEP") {
+                    parseBEP(tmp)
+                  }
+                  .mapFilter { x =>
+                    for {
+                      comp <- x.payload.completed
+                      id <- x.id
+                      targetCompletedId <- id.id.targetCompleted
+                      label <- Some(targetCompletedId.label).filter(bspLabels.contains)
+                    } yield (label, comp.success)
+                  }
+                  .evalFilter {
+                    case (label, true) => IO.pure(true)
+                    case (label, false) =>
+                      eliminatedRef.get.flatMap { eliminated =>
+                        // we have not been eliminated, but we have failed
+                        // eliminate all our ancestors, but keep this target
+                        if (!eliminated.contains(label)) {
+                          val anc = dg.ancestors.get(label).getOrElse(Set.empty)
+                          trace.logger.logInfo(s"$label failed but is not elimintaed, eliminating ancestors $anc") *>
+                            eliminatedRef.update(_ ++ anc).as(true)
+                        }
+                        // we have been eliminated, a child of ours has failed
+                        // clear all previous diagnostics for this target
+                        else {
+                          diagnosticEffect(buildIdent(label), Nil).as(false)
+                        }
                       }
                   }
-
-                // if there are no diagnostics for a target, clear the diagnostics
-                // if there are diagnostics for a target, publish them
-                def publishDiag: IO[Unit] = readDiagnostics.flatMap { tdOpt =>
-                  val bti = buildIdent(label)
-                  tdOpt.toList.flatTraverse(convertDiagnostic(trace.logger, wsr, bti, _)).flatMap { xs =>
-                    val prevHere = prevDiagnostics.get(bti).toList.flatten
-                    val toClear = prevHere.toSet -- xs.map(_.textDocument)
-
-                    xs.traverse(x => publishDiagnostics(x) *> cacheDiagnostic(bti, x.textDocument)) *>
-                      toClear.toList
-                        .map(PublishDiagnosticsParams(_, bti, None, Nil, true))
-                        .traverse_(publishDiagnostics)
-                  }
-                }
-
-                // if success then there are semanticdb files to publish
-                // if !success then use cached semanticdb files
-                def writeSemanticDB =
-                  if (success) {
-                    scalacOptionsMap.get(label).traverse_ { sco =>
-                      Files[IO].exists(execRoot / Path(sco.targetroot)).flatMap {
-                        case false =>
-                          trace.logger.logWarn(s"no semanticdb targetroot for $label, this is likely a bug")
-                        case true => cacheSemanticdbPath(execRoot, sco.targetroot)
-                      }
-                    }
-                  } else IO.unit
-
-                IO.whenA(nonEmptySources.contains(label)) {
-                  publishDiag *> writeSemanticDB
-                }
               }
+
+          labelStream.parEvalMapUnorderedUnbounded { case (label, success) =>
+            def readDiagnostics: IO[Option[diagnostics.TargetDiagnostics]] =
+              diagnosticsFiles.get(label) match {
+                case None =>
+                  trace.logger.logInfo(s"no diagnostics file declared for $label, this is likely a bug").as(None)
+                case Some(x) =>
+                  val p = execRoot / x
+
+                  Files[IO].exists(p).flatMap {
+                    case false =>
+                      trace.logger.logWarn(s"no diagnostics file for $label, this will cause a degraded experience").as(None)
+                    case true =>
+                      Files[IO]
+                        .readAll(p)
+                        .through(fs2.io.toInputStream[IO])
+                        .evalMap(is => IO.blocking(diagnostics.TargetDiagnostics.parseFrom(is)))
+                        .compile
+                        .lastOrError
+                        .map(Some(_))
+                  }
+              }
+
+            // if there are no diagnostics for a target, clear the diagnostics
+            // if there are diagnostics for a target, publish them
+            def publishDiag: IO[Unit] = readDiagnostics.flatMap { tdOpt =>
+              val bti = buildIdent(label)
+              tdOpt.toList
+                .flatTraverse(convertDiagnostic(trace.logger, wsr, bti, _))
+                .flatMap(diagnosticEffect(bti, _))
+            }
+
+            // if success then there are semanticdb files to publish
+            // if !success then use cached semanticdb files
+            def writeSemanticDB =
+              if (success) {
+                scalacOptionsMap.get(label).traverse_ { sco =>
+                  Files[IO].exists(execRoot / Path(sco.targetroot)).flatMap {
+                    case false =>
+                      trace.logger.logWarn(s"no semanticdb targetroot for $label, this is likely a bug")
+                    case true => cacheSemanticdbPath(execRoot, sco.targetroot)
+                  }
+                }
+              } else IO.unit
+
+            IO.whenA(nonEmptySources.contains(label)) {
+              publishDiag *> writeSemanticDB
+            }
           }
         }
       }
