@@ -110,7 +110,7 @@ final case class BspState(
     derivedEnvCache: Option[Map[String, String]],
     buildTargetCache: Option[BuildTargetCache],
     diagnosticsFilesCache: Option[Map[String, Path]],
-    dependencyGraph: Option[DependencyGraph] = None,
+    dependencyGraphCache: Option[DependencyGraph] = None,
     prevDiagnostics: Map[BuildTargetIdentifier, List[TextDocumentIdentifier]] = Map.empty
 ) {
   def workspaceRoot: Option[SafeUri] = initReq.map(_.rootUri)
@@ -222,11 +222,13 @@ class BspServerOps(
   def evalModify[A](f: BspState => IO[(BspState, A)]): IO[A] =
     state.get.flatMap(f).flatMap { case (s, x) => state.set(s) as x }
 
-  def cached[A](get: BspState => Option[A], set: BspState => A => BspState)(run: => IO[A]): IO[A] =
+  def cached[A](name: String)(get: BspState => Option[A], set: BspState => A => BspState)(run: => IO[A]): IO[A] =
     evalModify { s =>
       get(s) match {
-        case Some(x) => IO.pure((s, x))
-        case None    => run.map(x => (set(s)(x), x))
+        case Some(x) => trace.logger.logInfo(s"using cache for $name").as((s, x))
+        case None =>
+          trace.logger.logInfo(s"cache miss for $name, running action") >>
+            run.map(x => (set(s)(x), x))
       }
     }
 
@@ -265,12 +267,12 @@ class BspServerOps(
     }
 
   def dependencyGraph: IO[DependencyGraph] =
-    cached(_.dependencyGraph, s => x => s.copy(dependencyGraph = Some(x))) {
+    cached("dependencyGraph")(_.dependencyGraphCache, s => x => s.copy(dependencyGraphCache = Some(x))) {
       readBuildTargets.map(bts => DependencyGraph(bts.map { case (k, v) => k -> v.deps }.toMap))
     }
 
   def buildTargetCache: IO[BuildTargetCache] =
-    cached(_.buildTargetCache, s => x => s.copy(buildTargetCache = Some(x))) {
+    cached("buildTargetCache")(_.buildTargetCache, s => x => s.copy(buildTargetCache = Some(x))) {
       derivedExecRoot.flatMap(execRoot => tasks.flatMap(_.buildTargetCache(execRoot)))
     }
 
@@ -302,7 +304,7 @@ class BspServerOps(
     }
 
   def derivedEnv: IO[Map[String, String]] =
-    cached(_.derivedEnvCache, s => x => s.copy(derivedEnvCache = Some(x))) {
+    cached("derivedEnv")(_.derivedEnvCache, s => x => s.copy(derivedEnvCache = Some(x))) {
       workspaceRoot.flatMap(mkTasks).flatMap(_.api.info)
     }
 
@@ -310,7 +312,7 @@ class BspServerOps(
     derivedEnv.map(_.apply("execution_root")).map(Path(_))
 
   def diagnosticsFiles =
-    cached(_.diagnosticsFilesCache, s => x => s.copy(diagnosticsFilesCache = Some(x))) {
+    cached("diagnosticsFiles")(_.diagnosticsFilesCache, s => x => s.copy(diagnosticsFilesCache = Some(x))) {
       tasks.flatMap(_.diagnosticsFiles.map(_.toMap))
     }
 
@@ -352,29 +354,35 @@ class BspServerOps(
 
   def tasks = workspaceRoot.flatMap(mkTasks)
 
-  def initalize(msg: InitializeBuildParams): IO[Option[Json]] =
+  def initalize(msg: InitializeBuildParams): IO[Option[Json]] = {
+    val makeEnv =
+      BazelAPI(uriToPath(msg.rootUri), buildArgs, aqueryArgs, logger, trace, None).info.flatTap { env =>
+        trace.logger.logInfo(s"running with bazel env $env")
+      }
+
     state.get
       .flatMap { s =>
         if s.workspaceRoot.isDefined then IO.raiseError(new Exception("already initialized"))
-        else
-          BazelAPI(uriToPath(msg.rootUri), buildArgs, aqueryArgs, logger, trace, None).info.flatMap { env =>
-            trace.logger.logInfo(s"running with bazel env $env") >>
-              state.update(_.copy(initReq = Some(msg), sourceEnv = Some(env))) <*
-              derivedEnv.flatMap(env => trace.logger.logInfo(s"derived env which mezel will run in $env"))
-          }
+        else makeEnv.flatMap(env => state.update(_.copy(initReq = Some(msg), sourceEnv = Some(env))))
       } >> {
       val gw = GraphWatcher( /*msg.rootUri, mkTasks(msg.rootUri), */ trace.nested("watcher"))
       sup
         .supervise {
-          gw.startWatcher(NonEmptyList.one(uriToPath(msg.rootUri)) /*watchDirectories*/ ) >>
-            sendNotification(
-              "buildTarget/didChange",
-              DidChangeBuildTarget(
-                List(
-                  BuildTargetEvent(BuildTargetIdentifier(msg.rootUri), BuildTargetEventKind.Changed)
+          gw.startWatcher(NonEmptyList.one(uriToPath(msg.rootUri)) /*watchDirectories*/ )
+            .evalTap { _ =>
+              trace.logger.logInfo(s"something changed, clearing all the caches") *>
+                makeEnv.flatMap(env => state.set(BspState.empty.copy(initReq = Some(msg), sourceEnv = Some(env)))) *>
+                sendNotification(
+                  "buildTarget/didChange",
+                  DidChangeBuildTarget(
+                    List(
+                      BuildTargetEvent(BuildTargetIdentifier(msg.rootUri), BuildTargetEventKind.Created)
+                    )
+                  )
                 )
-              )
-            )
+            }
+            .compile
+            .drain
           // eventStream
           //   .evalMap { wr =>
           //     val combined = (
@@ -417,6 +425,7 @@ class BspServerOps(
           }
         }
     }
+  }
 
   def dependencySources(targets: List[SafeUri]): IO[Option[Json]] =
     for {
@@ -620,8 +629,6 @@ class BspServerOps(
       wsr <- workspaceRoot
       execRoot <- derivedExecRoot
       bts <- readBuildTargets
-      // force some caches
-      _ <- dependencyGraph
     } yield WorkspaceBuildTargetsResult {
       BuildTarget(
         id = BuildTargetIdentifier(SafeUri("workspace")),

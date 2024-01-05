@@ -154,12 +154,14 @@ class GraphWatcher(
   def startWatcher(
       paths: NonEmptyList[Path]
       // init: BuildTargetCache
-  ): IO[Unit] = {
+  ): Stream[IO, Unit] = {
     // val genLabels = trace.trace("genLabels") {
     //   tasks.buildTargetCache.map(_.buildTargets.map { case (k, _) => k }.toSet)
     // }
     // genLabels.map { init =>
-    trace.logger.logInfo(s"Starting watcher for ${paths.map(p => s"'${p.toString}'").mkString_(", ")}") >>
+    Stream.eval {
+      trace.logger.logInfo(s"Starting watcher for ${paths.map(p => s"'${p.toString}'").mkString_(", ")}")
+    } >>
       Stream
         .emits(paths.toList)
         .map(Files[IO].watch)
@@ -175,9 +177,8 @@ class GraphWatcher(
               trace.logger.logInfo(s"did build change form looking at the interesting events? ${bdc}")
             }
         }
-        .exists(identity)
-        .compile
-        .drain
+        .filter(identity)
+        .void
     // .evalMapAccumulate(init) { case (prev, events) =>
     //   trace.logger.logInfo(s"${events.size} events unconsed ${events}") >>
     //     genLabels

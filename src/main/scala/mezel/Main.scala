@@ -67,7 +67,7 @@ object Main
       SignallingRef.of[IO, BspState](BspState.empty).flatMap { state =>
         Catch.ioCatch.flatMap { implicit C =>
           C.use[Unit] { Exit =>
-            Supervisor[IO](await = true).use { sup =>
+            Supervisor[IO](await = false).use { sup =>
               Channel.bounded[IO, Json](64).flatMap { output =>
                 def logger(originId: Option[String]) = Logger.make(None, originId)(x => output.send(x.asJson).void)
 
