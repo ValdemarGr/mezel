@@ -107,10 +107,6 @@ final case class DependencyGraph(
 final case class BspState(
     initReq: Option[InitializeBuildParams],
     sourceEnv: Option[Map[String, String]],
-    derivedEnvCache: Option[Map[String, String]],
-    buildTargetCache: Option[BuildTargetCache],
-    diagnosticsFilesCache: Option[Map[String, Path]],
-    dependencyGraphCache: Option[DependencyGraph] = None,
     prevDiagnostics: Map[BuildTargetIdentifier, List[TextDocumentIdentifier]] = Map.empty
 ) {
   def workspaceRoot: Option[SafeUri] = initReq.map(_.rootUri)
@@ -134,7 +130,7 @@ def buildIdent(label: String): BuildTargetIdentifier = {
 def uriToPath(suri: SafeUri): Path = Path.fromNioPath(Paths.get(new URI(suri.value)))
 
 object BspState {
-  val empty: BspState = BspState(None, None, None, None, None)
+  val empty: BspState = BspState(None, None)
 }
 
 def convertDiagnostic(
@@ -208,6 +204,22 @@ def convertDiagnostic(
   }
 }
 
+final case class BspCacheKeys(
+    derivedEnv: CacheKey[Map[String, String]],
+    buildTargetCache: CacheKey[BuildTargetCache],
+    diagnosticsFiles: CacheKey[Map[String, Path]],
+    dependencyGraph: CacheKey[DependencyGraph]
+)
+
+object BspCacheKeys {
+  def make: IO[BspCacheKeys] = (
+    CacheKey.make[Map[String, String]],
+    CacheKey.make[BuildTargetCache],
+    CacheKey.make[Map[String, Path]],
+    CacheKey.make[DependencyGraph]
+  ).mapN(BspCacheKeys.apply)
+}
+
 class BspServerOps(
     state: SignallingRef[IO, BspState],
     sup: Supervisor[IO],
@@ -215,22 +227,14 @@ class BspServerOps(
     buildArgs: List[String],
     aqueryArgs: List[String],
     logger: Logger,
-    trace: Trace
+    trace: Trace,
+    cache: Cache,
+    cacheKeys: BspCacheKeys
 )(implicit R: Raise[IO, BspResponseError]) {
   import _root_.io.circe.syntax.*
 
-  def evalModify[A](f: BspState => IO[(BspState, A)]): IO[A] =
-    state.get.flatMap(f).flatMap { case (s, x) => state.set(s) as x }
-
-  def cached[A](name: String)(get: BspState => Option[A], set: BspState => A => BspState)(run: => IO[A]): IO[A] =
-    evalModify { s =>
-      get(s) match {
-        case Some(x) => trace.logger.logInfo(s"using cache for $name").as((s, x))
-        case None =>
-          trace.logger.logInfo(s"cache miss for $name, running action") >>
-            run.map(x => (set(s)(x), x))
-      }
-    }
+  def cached[A](name: String)(key: BspCacheKeys => CacheKey[A])(run: => IO[A]): IO[A] =
+    cache.cached(key(cacheKeys))(trace.logger.logInfo(s"cache miss for $name, running action") *> run)
 
   // for now we just compile
   // TODO, we can stream the results out into json
@@ -267,12 +271,12 @@ class BspServerOps(
     }
 
   def dependencyGraph: IO[DependencyGraph] =
-    cached("dependencyGraph")(_.dependencyGraphCache, s => x => s.copy(dependencyGraphCache = Some(x))) {
+    cached("dependencyGraph")(_.dependencyGraph) {
       readBuildTargets.map(bts => DependencyGraph(bts.map { case (k, v) => k -> v.deps }.toMap))
     }
 
   def buildTargetCache: IO[BuildTargetCache] =
-    cached("buildTargetCache")(_.buildTargetCache, s => x => s.copy(buildTargetCache = Some(x))) {
+    cached("buildTargetCache")(_.buildTargetCache) {
       derivedExecRoot.flatMap(execRoot => tasks.flatMap(_.buildTargetCache(execRoot)))
     }
 
@@ -304,7 +308,7 @@ class BspServerOps(
     }
 
   def derivedEnv: IO[Map[String, String]] =
-    cached("derivedEnv")(_.derivedEnvCache, s => x => s.copy(derivedEnvCache = Some(x))) {
+    cached("derivedEnv")(_.derivedEnv) {
       workspaceRoot.flatMap(mkTasks).flatMap(_.api.info)
     }
 
@@ -312,7 +316,7 @@ class BspServerOps(
     derivedEnv.map(_.apply("execution_root")).map(Path(_))
 
   def diagnosticsFiles =
-    cached("diagnosticsFiles")(_.diagnosticsFilesCache, s => x => s.copy(diagnosticsFilesCache = Some(x))) {
+    cached("diagnosticsFiles")(_.diagnosticsFiles) {
       tasks.flatMap(_.diagnosticsFiles.map(_.toMap))
     }
 
@@ -365,13 +369,13 @@ class BspServerOps(
         if s.workspaceRoot.isDefined then IO.raiseError(new Exception("already initialized"))
         else makeEnv.flatMap(env => state.update(_.copy(initReq = Some(msg), sourceEnv = Some(env))))
       } >> {
-      val gw = GraphWatcher( /*msg.rootUri, mkTasks(msg.rootUri), */ trace.nested("watcher"))
+      val gw = GraphWatcher(trace.nested("watcher"))
       sup
         .supervise {
           gw.startWatcher(NonEmptyList.one(uriToPath(msg.rootUri)) /*watchDirectories*/ )
             .evalTap { _ =>
               trace.logger.logInfo(s"something changed, clearing all the caches") *>
-                makeEnv.flatMap(env => state.set(BspState.empty.copy(initReq = Some(msg), sourceEnv = Some(env)))) *>
+                cache.clear *>
                 sendNotification(
                   "buildTarget/didChange",
                   DidChangeBuildTarget(
@@ -383,22 +387,6 @@ class BspServerOps(
             }
             .compile
             .drain
-          // eventStream
-          //   .evalMap { wr =>
-          //     val combined = (
-          //       wr.modified.toList.tupleRight(BuildTargetEventKind.Changed) ++
-          //         wr.deleted.toList.tupleRight(BuildTargetEventKind.Deleted) ++
-          //         wr.created.toList.tupleRight(BuildTargetEventKind.Created)
-          //     ).map { case (label, kind) => BuildTargetEvent(buildIdent(label), kind) }
-
-          //     logger.logInfo(s"producing ${combined} change events") >>
-          //       combined.toNel.traverse_ { events =>
-          //         sendNotification("buildTarget/didChange", DidChangeBuildTarget(events.toList))
-          //       }
-          //   }
-          //   .compile
-          //   .drain
-          // }
         }
         .as {
           Some {

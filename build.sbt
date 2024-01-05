@@ -46,6 +46,7 @@ lazy val sharedSettings = Seq(
     "org.typelevel" %% "cats-effect" % "3.5.2",
     "org.typelevel" %% "cats-core" % "2.9.0",
     "org.typelevel" %% "cats-parse" % "0.3.8",
+    "org.typelevel" %% "vault" % "3.5.0",
     "io.circe" %% "circe-core" % "0.14.6",
     "io.circe" %% "circe-parser" % "0.14.6",
     "io.circe" %% "circe-generic" % "0.14.6",
