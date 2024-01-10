@@ -134,7 +134,6 @@ object Main
                                     //   os.initReq.traverse(ops.initalize) >> ops.buildTargets.as(None)
                                     // }
                                     case "build/exit" | "build/shutdown" => Exit.raise(())
-                                    // I got this while testing?
                                     case "$/cancelRequest" =>
                                       expect[CancelParams].flatMap(p => rl.cancel(p.id)).as(None)
                                     case m => IO.raiseError(new RuntimeException(s"Unknown method: $m"))
