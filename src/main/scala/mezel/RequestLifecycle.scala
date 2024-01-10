@@ -19,7 +19,8 @@ object RequestLifecycle {
               IO.race(request.map(_.some), cancelMe.get.as(None)).map(_.merge)
           }
 
-        override def cancel(id: RpcId): IO[Unit] = ???
+        override def cancel(id: RpcId): IO[Unit] =
+          ref.modify(m => (m - id, m.get(id))).flatMap(_.traverse_(_.void))
       }
     }
   }
