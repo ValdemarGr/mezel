@@ -447,3 +447,7 @@ final case class ResourcesItem(
     target: BuildTargetIdentifier,
     resources: List[SafeUri]
 ) derives Codec.AsObject
+
+final case class CancelParams(
+  id: RpcId
+) derives Codec.AsObject
