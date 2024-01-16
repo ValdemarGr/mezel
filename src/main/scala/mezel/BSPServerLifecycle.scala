@@ -1,5 +1,6 @@
 package mezel
 
+import scala.concurrent.duration._
 import fs2.io.file._
 import fs2.Chunk
 import cats.effect._
@@ -38,16 +39,21 @@ class BSPServerLifecycle(
     )
 
   def runRequest(id: Option[RpcId])(res: IO[Either[BspResponseError, Option[Json]]]): IO[Unit] = {
-    val handleError: IO[Option[Response]] = res.map {
-      case Left(err)    => Some(Response("2.0", id, None, Some(err.responseError)))
-      case Right(value) =>
-        // if id is defined always respond
-        // if id is not defined only respond if value is defined
-        id match {
-          case Some(id) => Some(Response("2.0", Some(id), value, None))
-          case None     => value.map(j => Response("2.0", None, Some(j), None))
-        }
-    }
+    val handleError: IO[Option[Response]] =
+      (res <&
+        IO.sleep(
+          /* metals seems to sometimes deadlock if mezel responds too fast (noop operations), maybe take a look at the code (lsp4j?) */
+          100.millis
+        )).map {
+        case Left(err)    => Some(Response("2.0", id, None, Some(err.responseError)))
+        case Right(value) =>
+          // if id is defined always respond
+          // if id is not defined only respond if value is defined
+          id match {
+            case Some(id) => Some(Response("2.0", Some(id), value, None))
+            case None     => value.map(j => Response("2.0", None, Some(j), None))
+          }
+      }
 
     val leased = id.map(id => deps.rl.run(id, handleError).map(_.flatten)).getOrElse(handleError)
 
