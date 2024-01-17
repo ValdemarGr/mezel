@@ -369,12 +369,13 @@ class BspServerOps(
         if s.workspaceRoot.isDefined then IO.raiseError(new Exception("already initialized"))
         else makeEnv.flatMap(env => state.update(_.copy(initReq = Some(msg), sourceEnv = Some(env))))
       } >> {
-      val gw = GraphWatcher(trace.nested("watcher"))
+      val watcherTrace = trace.nested("watcher")
+      val gw = GraphWatcher(watcherTrace)
       sup
         .supervise {
           gw.startWatcher(NonEmptyList.one(uriToPath(msg.rootUri)) /*watchDirectories*/ )
             .evalTap { _ =>
-              trace.logger.logInfo(s"something changed, clearing all the caches") *>
+              watcherTrace.logger.logInfo(s"something changed, clearing all the caches") *>
                 cache.clear *>
                 sendNotification(
                   "buildTarget/didChange",
@@ -384,6 +385,11 @@ class BspServerOps(
                     )
                   )
                 )
+            }
+            .handleErrorWith { e =>
+              Stream.eval {
+                watcherTrace.logger.logWarn(s"watcher failed with $e")
+              }
             }
             .compile
             .drain
