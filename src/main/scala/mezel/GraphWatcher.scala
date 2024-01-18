@@ -90,8 +90,11 @@ class GraphWatcher(
           val interesting = eliminateRedundant(events)
           trace.logger.logInfo(s"${events.size} events unconsed ${events}") *>
             trace.logger.logInfo(s"eliminated ${events.size - interesting.size} uninteresting events ${interesting}") *>
-            buildDidChange(interesting).flatTap { bdc =>
-              trace.logger.logInfo(s"did build change form looking at the interesting events? ${bdc}")
+            buildDidChange(interesting).attempt.flatMap {
+              case Left(err) =>
+                trace.logger.logError(s"error while checking if build changed: ${err}").as(true)
+              case Right(bdc) =>
+                trace.logger.logInfo(s"did build change form looking at the interesting events? ${bdc}").as(bdc)
             }
         }
         .filter(identity)

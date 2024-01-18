@@ -373,26 +373,32 @@ class BspServerOps(
       val gw = GraphWatcher(watcherTrace)
       sup
         .supervise {
-          gw.startWatcher(NonEmptyList.one(uriToPath(msg.rootUri)) /*watchDirectories*/ )
-            .evalTap { _ =>
-              watcherTrace.logger.logInfo(s"something changed, clearing all the caches") *>
-                cache.clear *>
-                sendNotification(
-                  "buildTarget/didChange",
-                  DidChangeBuildTarget(
-                    List(
-                      BuildTargetEvent(BuildTargetIdentifier(msg.rootUri), BuildTargetEventKind.Created)
-                    )
+          val didChange =
+            cache.clear *>
+              sendNotification(
+                "buildTarget/didChange",
+                DidChangeBuildTarget(
+                  List(
+                    BuildTargetEvent(BuildTargetIdentifier(msg.rootUri), BuildTargetEventKind.Created)
                   )
                 )
-            }
-            .handleErrorWith { e =>
-              Stream.eval {
-                watcherTrace.logger.logWarn(s"watcher failed with $e")
+              )
+          lazy val go: IO[Unit] =
+            gw.startWatcher(NonEmptyList.one(uriToPath(msg.rootUri)) /*watchDirectories*/ )
+              .evalTap { _ =>
+                watcherTrace.logger.logInfo(s"something changed, clearing all the caches") *> didChange
               }
-            }
-            .compile
-            .drain
+              .handleErrorWith { e =>
+                Stream.eval {
+                  watcherTrace.logger.logWarn(s"watcher failed with $e, reloading to be consistent") *>
+                    didChange *>
+                    go
+                }
+              }
+              .compile
+              .drain
+
+          go
         }
         .as {
           Some {
