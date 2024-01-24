@@ -43,7 +43,7 @@ class BSPServerLifecycle(
       (res <&
         IO.sleep(
           /* metals seems to sometimes deadlock if mezel responds too fast (noop operations), maybe take a look at the code (lsp4j?) */
-          100.millis
+          200.millis
         )).map {
         case Left(err)    => Some(Response("2.0", id, None, Some(err.responseError)))
         case Right(value) =>
