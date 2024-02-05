@@ -10,7 +10,7 @@ import scala.concurrent.duration._
 def parseBEP(path: Path): Stream[IO, bes.BuildEvent] = {
   Files[IO].tail(path, pollDelay = 50.millis).through(fs2.io.toInputStream[IO]).flatMap { is =>
     Stream
-      .repeatEval(IO.blocking(bes.BuildEvent.parseDelimitedFrom(is)))
+      .repeatEval(IO.interruptible(bes.BuildEvent.parseDelimitedFrom(is)))
       .unNoneTerminate
       .takeWhile(x => !x.payload.isFinished)
   }

@@ -519,7 +519,7 @@ class BspServerOps(
                       Files[IO]
                         .readAll(p)
                         .through(fs2.io.toInputStream[IO])
-                        .evalMap(is => IO.blocking(diagnostics.TargetDiagnostics.parseFrom(is)))
+                        .evalMap(is => IO.interruptible(diagnostics.TargetDiagnostics.parseFrom(is)))
                         .compile
                         .lastOrError
                         .map(Some(_))
