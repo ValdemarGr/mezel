@@ -30,12 +30,12 @@ object AspectTypes {
       directory: String
   ) derives Decoder
 
-  final case class ScalaVersion(major: Int, minor: Int, patch: Int) {
+  final case class ScalaVersion(major: String, minor: String, patch: String) {
     def toVersion: String = s"${major}.${minor}.${patch}"
   }
   object ScalaVersion {
     given Decoder[ScalaVersion] = Decoder[String].emap { s =>
-      val parts = s.split("\\.").toList.mapFilter(_.toIntOption)
+      val parts = s.split("\\.").toList
       parts match {
         case major :: minor :: patch :: Nil => Right(ScalaVersion(major, minor, patch))
         case _                              => Left(s"invalid scala version: ${s}")

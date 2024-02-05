@@ -600,7 +600,7 @@ class BspServerOps(
       options <- scos.toList.traverse { case (label, sco) =>
         semanticdbCachePath(sco.targetroot).map { semanticdbDir =>
           val semanticDBFlags =
-            if (sco.compilerVersion.major === 2) {
+            if (sco.compilerVersion.major === "2") {
               List(
                 s"-P:semanticdb:targetroot:${semanticdbDir.toString}",
                 "-Xplugin-require:semanticdb",
