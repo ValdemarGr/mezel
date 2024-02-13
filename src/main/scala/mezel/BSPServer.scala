@@ -578,8 +578,7 @@ class BspServerOps(
       out <- srcs.toList
         .traverse { case (label, src) =>
           src.sources
-            // .traverse(x => IO(Path.fromNioPath((execRoot / x).toNioPath.toRealPath())).map(pathToUri))
-            .traverse(x => IO(pathToUri(execRoot / x)))
+            .traverse(x => IO(Path.fromNioPath((execRoot / x).toNioPath.toRealPath())).flatMap(y => IO(pathToUri(y))))
             .map { xs =>
               SourcesItem(
                 buildIdent(label),

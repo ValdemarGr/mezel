@@ -1,5 +1,3 @@
-load(":write_bsp_build_config.bzl", "write_bsp_build_config")
-
 java_binary(
   name = "mezel_jar",
   main_class = "mezel.Main",
