@@ -124,7 +124,7 @@ Create a config for Metals at `.bsp/mezel.json`:
 And that's it. Start your editor and select `Mezel` as your BSP server.
 
 #### Why not just run mezel though the bazel java distribution?
-Running Mezel though Bazel has been causing issues with broken stdin/stdout streams.
+Running Mezel though Bazel has been causing issues with broken stdin/stdout streams (on a nix-emulated FHS system).
 To alleviate this issue, the Mezel binary is prepared by a Bazel rule and then run as a separate process.
 
 ### External dependencies
