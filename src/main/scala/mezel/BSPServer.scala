@@ -578,7 +578,16 @@ class BspServerOps(
       out <- srcs.toList
         .traverse { case (label, src) =>
           src.sources
-            .traverse(x => IO(Path.fromNioPath((execRoot / x).toNioPath.toRealPath())).flatMap(y => IO(pathToUri(y))))
+            .traverse { x =>
+              val p = execRoot / x
+              Files[IO]
+                .exists(p)
+                .flatMap {
+                  case false => trace.logger.logWarn(s"source file does not exist yet, maybe it is generated? $p").as(p)
+                  case true  => IO(Path.fromNioPath((execRoot / x).toNioPath.toRealPath()))
+                }
+                .flatMap(y => IO(pathToUri(y)))
+            }
             .map { xs =>
               SourcesItem(
                 buildIdent(label),
