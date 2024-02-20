@@ -16,12 +16,12 @@ A non-exhaustive list of features that work:
 * Semi-automatic configuration generation
 * Minimal build target definitons using ijars over jars
 * Automatic reload on build change.
+* IntelliJ support (lightly tested)
 
 Things that I will be working that Mezel doesn't support yet:
 * Caching of output jars/ijars from local targets (improves DX on big refactorings since transitive jars will persist through bazel output extermination)
 * Support for an add-it-all-to-classpath mode such that you won't need to add a dependency to your BUILD.bazel for it to be available in your IDE?
 * Scala3 support [*](https://github.com/ValdemarGr/mezel/issues/12#issuecomment-1845372743)
-* Verification of IntelliJ support
 
 ## Getting started
 ### Scala rules setup
