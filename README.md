@@ -138,8 +138,8 @@ I suggest checking your bsp file into VCS `.bsp/mezel.json` so it works for othe
 A configuration example that uses a custom toolchain and set of configuration options for local development (semanticdb + diagnostics + no fatal warnings):
 ```starlark
 #./BUILD.bazel
-load("@mezel//rules:mezel_binary.bzl", "mezel_binary")
-mezel_binary(
+load("@mezel//rules:make_mezel_launcher.bzl", "make_mezel_launcher")
+make_mezel_launcher(
     name = "mezel",
     build_args = [
         "--extra_toolchains=//toolchain:lsp",
