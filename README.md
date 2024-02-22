@@ -4,19 +4,20 @@ Mezel acts as a communication layer between Bazel and Scala BSP consumers such a
 
 Mezel is work-in-progress. I daily drive it with Metals using NeoVim, but any Metals-enabled editor works.
 A non-exhaustive list of features that work:
-* Semanticdb consumption from Bazel (code navigation)
-* External dependencies (from maven for instance, but also locally built and imported jars)
-* Presentation compiler support with plugins (type hints and such)
-* Caching of semanticdb files (bazel clears the output directory on every build)
-* Streamed diagnostics reporting for errors and warnings (diagnostics will appear as they are generated instead of waiting for the build to finish)
-* Build change propagation (mezel always builds all targets so you get full diagnostics)
-* Logging of all build events with performance traces
-* Build isolation, uses a custom `--output_base` to avoid destroying your build cache
-* Custom build/query flags
-* Semi-automatic configuration generation
-* Minimal build target definitons using ijars over jars
+* Semanticdb consumption from Bazel (code navigation).
+* External dependencies (from maven for instance, but also locally built and imported jars).
+* Presentation compiler support with plugins (type hints and such).
+* Caching of semanticdb files (bazel clears the output directory on every build).
+* Streamed diagnostics reporting for errors and warnings (diagnostics will appear as they are generated instead of waiting for the build to finish).
+* Build change propagation (mezel always builds all targets so you get full diagnostics).
+* Logging of all build events with performance traces.
+* Build isolation, uses a custom `--output_base` to avoid destroying your build cache.
+* Custom build/query flags.
+* Semi-automatic configuration generation.
+* Minimal build target definitons using ijars over jars.
 * Automatic reload on build change.
-* IntelliJ support (lightly tested)
+* IntelliJ support (lightly tested).
+* Task cancellation.
 
 Things that I will be working that Mezel doesn't support yet:
 * Caching of output jars/ijars from local targets (improves DX on big refactorings since transitive jars will persist through bazel output extermination)
@@ -129,7 +130,7 @@ To alleviate this issue, the Mezel binary is prepared by a Bazel rule and then r
 
 ### External dependencies
 External dependencies should work but have only been tested with [rules_jvm_external](https://github.com/bazelbuild/rules_jvm_external).
-When you import external dependencies you must ensure that you fetch their sources also, such that there are sources to navigate to on "goto definition" type actions.
+When you import external dependencies you must ensure that you fetch their sources, such that there are sources to navigate to on "goto definition" type actions.
 For rules_jvm_external you can flag this in your `maven_install` as seen [here](https://github.com/bazelbuild/rules_jvm_external#fetch-source-jars).
 
 ### Configuration
