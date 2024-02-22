@@ -2,7 +2,7 @@
 Mezel is a Scala [BSP](https://build-server-protocol.github.io/) implementation for Bazel.
 Mezel acts as a communication layer between Bazel and Scala BSP consumers such as [Metals](https://scalameta.org/metals/).
 
-Mezel is work-in-progress. I daily drive it with Metals using NeoVim, but any Metals editor should work.
+Mezel is work-in-progress. I daily drive it with Metals using NeoVim, but any Metals-enabled editor works.
 A non-exhaustive list of features that work:
 * Semanticdb consumption from Bazel (code navigation)
 * External dependencies (from maven for instance, but also locally built and imported jars)
