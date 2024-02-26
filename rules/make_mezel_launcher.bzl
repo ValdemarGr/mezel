@@ -2,11 +2,11 @@ def _impl(ctx):
   build_args = " ".join(["--build-arg={}".format(x) for x in ctx.attr.build_args])
   aquery_args = " ".join(["--aquery-arg={}".format(x) for x in ctx.attr.aquery_args])
 
-  xs = ctx.attr._mezel_jar.files.to_list()
+  xs = ctx.attr.mezel_jar.files.to_list()
   if len(xs) != 1:
-    fail("Expected exactly one file in _mezel_jar, got {} files".format(len(xs)))
+    fail("Expected exactly one file in mezel_jar, got {} files".format(len(xs)))
 
-  binary_file = ctx.attr._mezel_jar.files.to_list()[0]
+  binary_file = ctx.attr.mezel_jar.files.to_list()[0]
 
   mk_runscript_content = """#!/usr/bin/env bash
 BINARY_FILE={}
