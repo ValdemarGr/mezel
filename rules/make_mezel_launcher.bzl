@@ -34,7 +34,7 @@ make_mezel_launcher = rule(
   attrs = {
     "build_args": attr.string_list(mandatory = False),
     "aquery_args": attr.string_list(mandatory = False),
-    "_mezel_jar": attr.label(
+    "mezel_jar": attr.label(
       default = Label("@mezel_binary//jar"),
       allow_files = True
     ),
