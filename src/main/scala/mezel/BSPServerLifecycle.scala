@@ -34,7 +34,8 @@ class BSPServerLifecycle(
       logger,
       trace,
       deps.cache,
-      deps.cacheKeys
+      deps.cacheKeys,
+      deps.ct
     )
 
   def runRequest(id: Option[RpcId])(res: IO[Either[BspResponseError, Option[Json]]]): IO[Unit] = {
@@ -149,11 +150,12 @@ final case class BSPServerDeps(
     cacheKeys: BspCacheKeys,
     output: Channel[IO, Json],
     rl: RequestLifecycle,
-    C: Catch[IO]
+    C: Catch[IO],
+    ct: CancellableTask
 )
 
 object BSPServerDeps {
-  def make =
+  def make = CancellableTask.make.flatMap { ct =>
     (
       Resource.eval(Files[IO].createTempDirectory(None, "mezel-logs-", None)),
       Resource.eval(SignallingRef.of[IO, BspState](BspState.empty)),
@@ -161,7 +163,9 @@ object BSPServerDeps {
       Resource.eval(Cache.make),
       Resource.eval(BspCacheKeys.make),
       Resource.eval(Channel.bounded[IO, Json](64)),
-      Resource.eval(RequestLifecycle.make),
-      Resource.eval(Catch.ioCatch)
+      Resource.pure(RequestLifecycle.make(ct)),
+      Resource.eval(Catch.ioCatch),
+      Resource.pure(ct)
     ).mapN(BSPServerDeps.apply)
+  }
 }

@@ -1,5 +1,6 @@
 package mezel
 
+import cats.implicits.*
 import com.google.devtools.build.lib.query2.proto.proto2api.build
 import com.google.devtools.build.lib.analysis.analysis_v2
 import fs2.*
@@ -8,6 +9,7 @@ import fs2.io.file.*
 import cats.*
 import fs2.io.process.*
 import scalapb._
+import com.zaxxer.nuprocess.internal.LibC
 
 class BazelAPI(
     rootDir: Path,
@@ -17,20 +19,30 @@ class BazelAPI(
     trace: Trace,
     outputBase: Option[Path]
 ) {
+  case class Builder(
+      cmd: String,
+      args: List[String],
+      cwd: Option[Path] = None
+  )
+
   def pipe: Pipe[IO, Byte, String] = _.through(fs2.text.utf8.decode).through(fs2.text.lines)
 
-  def run(pb: ProcessBuilder): Resource[IO, Process[IO]] =
-    trace.traceResource(s"bazel command ${(pb.command :: pb.args).map(x => s"'$x'").mkString(" ")}") {
-      pb.spawn[IO]
+  def run(b: Builder): Resource[IO, Process[IO]] =
+    trace.traceResource(s"bazel command ${(b.cmd :: b.args).map(x => s"'$x'").mkString(" ")}") {
+      // CatsProcess.spawnFull[IO](b.cmd :: b.args, b.cwd).flatTap { cp =>
+      //   Resource.make(cp.pid)(pid => IO.blocking(LibC.kill(pid, 9)).void)
+      // }
+      val pb = ProcessBuilder(b.cmd, b.args)
+      b.cwd.fold(pb)(pb.withWorkingDirectory(_)).spawn[IO]
     }
 
   def builder(cmd: String, printLogs: Boolean, args: String*) = {
     val ob = outputBase.map(x => s"--output_base=${x.toString}").toList
-    ProcessBuilder(
+    Builder(
       "bazel",
-      ob ++ (cmd :: List("--noshow_loading_progress", "--noshow_progress").filter(_ => !printLogs)) ++ args.toList
+      ob ++ (cmd :: List("--noshow_loading_progress", "--noshow_progress").filter(_ => !printLogs)) ++ args.toList,
+      Some(rootDir)
     )
-      .withWorkingDirectory(rootDir)
   }
 
   def runAndParse[A <: GeneratedMessage](cmd: String, args: String*)(implicit ev: GeneratedMessageCompanion[A]): IO[A] = {
