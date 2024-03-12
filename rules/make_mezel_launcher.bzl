@@ -4,7 +4,8 @@ def _impl(ctx):
 
   xs = ctx.attr.mezel_jar.files.to_list()
   if len(xs) != 1:
-    fail("Expected exactly one file in mezel_jar, got {} files".format(len(xs)))
+    names = [str(x) for x in xs]
+    fail("Expected exactly one file in mezel_jar, got {} files: {}".format(len(xs), ", ".join(names)))
 
   binary_file = ctx.attr.mezel_jar.files.to_list()[0]
 
