@@ -44,6 +44,7 @@
     fmtall = pkgs.writeShellScriptBin "fmtall" ''
     scalafmt src && buildifier -r src && buildifier -lint fix src/**/*
     '';
+    proto-proj-root = ''''${PWD}/protos'';
     bazel-protos = [
       "src/main/java/com/google/devtools/build/lib/packages/metrics/package_load_metrics.proto"
       "src/main/protobuf/action_cache.proto"
@@ -56,15 +57,15 @@
       "src/main/java/com/google/devtools/build/lib/buildeventstream/proto/build_event_stream.proto"
     ];
     cps = lib.strings.concatLines 
-      (lib.lists.map (path: ''cp ${bazel-repo}/${path} ''${PWD}/src/main/protobuf/${path}'') bazel-protos);
+      (lib.lists.map (path: ''cp ${bazel-repo}/${path} ${proto-proj-root}/src/main/protobuf/${path}'') bazel-protos);
     gen-protobuf = pkgs.writeShellScriptBin "gen-mezel-protobuf" ''
-    rm -rf ''${PWD}/src/main/protobuf
-    ${pkgs.coreutils}/bin/mkdir -p ''${PWD}/src/main/protobuf/src/main/protobuf
-    ${pkgs.coreutils}/bin/mkdir -p ''${PWD}/src/main/protobuf/src/main/java/com/google/devtools/build/lib/buildeventstream/proto
-    ${pkgs.coreutils}/bin/mkdir -p ''${PWD}/src/main/protobuf/src/main/java/com/google/devtools/build/lib/packages/metrics
+    rm -rf ${proto-proj-root}/src/main/protobuf
+    ${pkgs.coreutils}/bin/mkdir -p ${proto-proj-root}/src/main/protobuf/src/main/protobuf
+    ${pkgs.coreutils}/bin/mkdir -p ${proto-proj-root}/src/main/protobuf/src/main/java/com/google/devtools/build/lib/buildeventstream/proto
+    ${pkgs.coreutils}/bin/mkdir -p ${proto-proj-root}/src/main/protobuf/src/main/java/com/google/devtools/build/lib/packages/metrics
     cp \
       ${rules-scala}/src/protobuf/io/bazel/rules_scala/diagnostics.proto \
-      ''${PWD}/src/main/protobuf/src/main/protobuf/diagnostics.proto
+      ${proto-proj-root}/src/main/protobuf/src/main/protobuf/diagnostics.proto
 
     ${cps}
     '';

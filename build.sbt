@@ -60,16 +60,25 @@ lazy val sharedSettings = Seq(
   )
 )
 
+lazy val protos = project
+  .in(file("protos"))
+  .settings(sharedSettings)
+  .settings(
+    name := "mezel-protos",
+    Compile / PB.targets := Seq(
+      scalapb.gen(scala3Sources = true) -> (Compile / sourceManaged).value / "scalapb"
+    ),
+    libraryDependencies ++= Seq(
+      "com.thesamet.scalapb" %% "scalapb-runtime" % scalapb.compiler.Version.scalapbVersion % "protobuf"
+    )
+  )
+
 lazy val root = project
   .in(file("."))
   .settings(sharedSettings)
   .settings(
     name := "mezel",
-    Compile / PB.targets := Seq(
-      scalapb.gen(scala3Sources = true) -> (Compile / sourceManaged).value / "scalapb"
-    ),
     libraryDependencies ++= Seq(
-      "com.thesamet.scalapb" %% "scalapb-runtime" % scalapb.compiler.Version.scalapbVersion % "protobuf",
       "com.monovore" %% "decline" % "2.4.1",
       "com.monovore" %% "decline-effect" % "2.4.1"
     ),
@@ -81,6 +90,7 @@ lazy val root = project
     assembly / mainClass := Some("mezel.Main"),
     assembly / assemblyOutputPath := file("target/mezel.jar")
   )
+  .dependsOn(protos)
 
 lazy val filesystemIO = project
   .in(file("filesystem-io"))

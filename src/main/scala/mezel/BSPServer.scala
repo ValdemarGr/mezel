@@ -337,17 +337,21 @@ class BspServerOps(
 
       val ls = Files[IO].walk(actualDir).evalFilterNot(Files[IO].isDirectory)
 
-      Files[IO].exists(cacheDir).flatMap {
-        case true  => Files[IO].deleteRecursively(cacheDir)
-        case false => IO.unit
-      } *>
+      // strategy is to first list all current files in cache dir
+      // then atomically move new semantic db files into the cache dir
+      Files[IO].tempDirectory.use { tmpDir =>
+        val tmpFile = tmpDir / "sem"
         ls.evalMap { p =>
           val fileRelativeToTargetRoot = actualDir.absolute.relativize(p.absolute)
           val targetFile = cacheDir / fileRelativeToTargetRoot
-          targetFile.parent.traverse_(Files[IO].createDirectories) *>
-            Files[IO].copy(p.absolute, targetFile, CopyFlags(CopyFlag.ReplaceExisting))
+          val fa = targetFile.parent.traverse_(Files[IO].createDirectories) *>
+            Files[IO].copy(p.absolute, tmpFile, CopyFlags(CopyFlag.ReplaceExisting)) *>
+            Files[IO].move(tmpFile, targetFile, CopyFlags(CopyFlag.ReplaceExisting, CopyFlag.AtomicMove))
+
+          fa
         }.compile
           .drain
+      }
     }
 
   def mkTasks(rootUri: SafeUri) = {
