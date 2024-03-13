@@ -2,7 +2,7 @@ package mezel
 
 import cats.implicits._
 import cats.effect._
-import cats.effect.std._
+import cats.effect.std.Mutex
 
 trait CancellableTask {
   def startFiber[A](id: String, task: IO[A]): IO[FiberIO[A]]
@@ -15,24 +15,23 @@ trait CancellableTask {
 
 object CancellableTask {
   def make: Resource[IO, CancellableTask] = {
-    Supervisor[IO](await = false).evalMap { sup =>
-      IO.ref(Map.empty[String, IO[Unit]])
-        .map(ref =>
-          new CancellableTask {
-            def startFiber[A](id: String, task: IO[A]): IO[FiberIO[A]] =
-              IO.deferred[Unit].flatMap { cancelMe =>
-                val t = IO
-                  .race(task, cancelMe.get >> IO.canceled >> IO.never[A])
-                  .map(_.merge)
-                  .guarantee(ref.update(_ - id))
-                val doCancel = cancelMe.complete(()).void
-                ref.update(_ + (id -> doCancel)) *> sup.supervise(t)
+    Resource.eval(Mutex[IO]).flatMap { lck =>
+      Resource.make(IO.ref(Map.empty[String, IO[Unit]]))(_.get.flatMap(_.values.toList.sequence_)).map { ref =>
+        new CancellableTask {
+          def startFiber[A](id: String, task: IO[A]): IO[FiberIO[A]] =
+            IO.uncancelable { poll =>
+              lck.lock.surround {
+                ref.modify(m => (m - id, m.get(id).sequence_)).flatten *>
+                  poll(task).start.flatTap(fib => ref.update(_ + (id -> fib.cancel)))
               }
+            }
 
-            def cancel(id: String): IO[Unit] =
+          def cancel(id: String): IO[Unit] =
+            lck.lock.surround {
               ref.get.flatMap(_.get(id).sequence_)
-          }
-        )
+            }
+        }
+      }
     }
   }
 }

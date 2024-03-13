@@ -283,7 +283,7 @@ class BspServerOps(
     }
 
   def prevDiagnostics: IO[Map[BuildTargetIdentifier, List[TextDocumentIdentifier]]] =
-    state.modify(s => s.copy(prevDiagnostics = Map.empty) -> s.prevDiagnostics)
+    state.get.map(_.prevDiagnostics)
 
   def cacheDiagnostic(buildTarget: BuildTargetIdentifier, td: TextDocumentIdentifier): IO[Unit] =
     state.update { s =>
@@ -453,8 +453,7 @@ class BspServerOps(
   val compilationTaskKey = "compile"
 
   def compile(targets: List[SafeUri]): IO[Option[Json]] = {
-    for {
-      _ <- Stream.eval(ct.cancel(compilationTaskKey))
+    val doCompile: Stream[IO, Unit] = for {
       wsr <- Stream.eval(workspaceRoot)
       t <- Stream.eval(tasks)
       prevDiagnostics <- Stream.eval(prevDiagnostics)
@@ -464,7 +463,7 @@ class BspServerOps(
       xs <- Stream.eval(readId)
       dg <- Stream.eval(dependencyGraph)
       _ <- Stream.eval {
-        def diagnosticsProcess(diagnosticsProtoFile: Path) =
+        def diagnosticsProcess(diagnosticsProtoFile: Path): Stream[IO, Unit] = {
           Stream.eval(readScalacOptions).flatMap { scalacOptions =>
             Stream.eval(readSources).flatMap { sources =>
               val nonEmptySources = sources.mapFilter { case (k, v) => Some(k).filter(_ => v.sources.nonEmpty) }.toSet
@@ -476,7 +475,8 @@ class BspServerOps(
                   val prevHere = prevDiagnostics.get(bti).toList.flatten
                   val toClear = prevHere.toSet -- xs.map(_.textDocument)
 
-                  xs.traverse(x => publishDiagnostics(x) *> cacheDiagnostic(bti, x.textDocument)) *>
+                  state.update(s => s.copy(prevDiagnostics = s.prevDiagnostics - bti)) *>
+                    xs.traverse(x => publishDiagnostics(x) *> cacheDiagnostic(bti, x.textDocument)) *>
                     toClear.toList
                       .map(PublishDiagnosticsParams(_, bti, None, Nil, true))
                       .traverse_(publishDiagnostics)
@@ -567,31 +567,40 @@ class BspServerOps(
               }
             }
           }
+        }
 
-        UUIDGen.randomString[IO].flatMap { compilationId =>
-          trace.logger.logInfo(s"compiling asynchonously with id $compilationId") *>
-            ct.start(
-              compilationTaskKey,
-              Files[IO].tempFile
-                .use { tmp =>
-                  diagnosticsProcess(tmp)
-                    .merge(Stream.eval(t.buildAll(s"--build_event_binary_file=${tmp.absolute.toString()}")))
-                    .compile
-                    .drain *> trace.logger.logInfo(s"compilation finished for id $compilationId")
-                }
-                .onCancel(trace.logger.logWarn(s"compilation cancelled for id $compilationId"))
-            )
+        Files[IO].tempFile.use { tmp =>
+          diagnosticsProcess(tmp)
+            .merge(Stream.eval(t.buildAll(s"--build_event_binary_file=${tmp.absolute.toString()}")))
+            .compile
+            .drain
         }
       }
-    } yield Some {
-      CompileResult(
-        None,
-        StatusCode.Ok,
-        None,
-        None
-      ).asJson
+    } yield ()
+
+    val loggedProgram: IO[Unit] =
+      for {
+        id <- UUIDGen.randomString[IO]
+        _ <- trace.logger.logInfo(s"beginning compilation task with id $id")
+        prg = {
+          trace.logger.logInfo(s"running compilation task with id $id") *>
+            doCompile.compile.drain <*
+            trace.logger.logInfo(s"finished compiling with id $id")
+        }.onCancel(trace.logger.logInfo(s"cancelled compilation with id $id"))
+        _ <- ct.start(compilationTaskKey, prg)
+      } yield ()
+
+    loggedProgram.as {
+      Some {
+        CompileResult(
+          None,
+          StatusCode.Ok,
+          None,
+          None
+        ).asJson
+      }
     }
-  }.compile.lastOrError
+  }
 
   def sources(targets: List[SafeUri]): IO[Option[Json]] =
     for {

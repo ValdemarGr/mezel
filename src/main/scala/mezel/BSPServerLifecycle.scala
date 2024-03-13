@@ -82,7 +82,7 @@ class BSPServerLifecycle(
         .rethrow
 
     val lg = logger(originId)
-    val trace = Trace.in(x.method, lg)
+    val trace = Trace.in(s"${x.id.map(_.value.toString()).getOrElse("?")}: ${x.method}", lg)
 
     runRequest(x.id) {
       deps.C.use[BspResponseError] { implicit R =>
