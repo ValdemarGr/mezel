@@ -56,7 +56,8 @@ lazy val sharedSettings = Seq(
     "io.github.valdemargr" %% "catch-effect" % "0.0.1",
     "org.typelevel" %% "kittens" % "3.1.0",
     "org.scalameta" %% "munit" % "1.0.0-M10" % Test,
-    "org.typelevel" %% "munit-cats-effect" % "2.0.0-M3" % Test
+    "org.typelevel" %% "munit-cats-effect" % "2.0.0-M3" % Test,
+    "com.zaxxer" % "nuprocess" % "2.0.1"
   )
 )
 

@@ -1,5 +1,7 @@
 package mezel
 
+import scala.concurrent.duration.*
+import cats.implicits.*
 import com.google.devtools.build.lib.query2.proto.proto2api.build
 import com.google.devtools.build.lib.analysis.analysis_v2
 import fs2.*
@@ -8,6 +10,8 @@ import fs2.io.file.*
 import cats.*
 import fs2.io.process.*
 import scalapb._
+import com.zaxxer.nuprocess.internal.LibC
+import cats.effect.kernel.Resource.ExitCase
 
 class BazelAPI(
     rootDir: Path,
@@ -17,20 +21,63 @@ class BazelAPI(
     trace: Trace,
     outputBase: Option[Path]
 ) {
+  case class Builder(
+      cmd: String,
+      args: List[String],
+      cwd: Option[Path] = None
+  )
+
   def pipe: Pipe[IO, Byte, String] = _.through(fs2.text.utf8.decode).through(fs2.text.lines)
 
-  def run(pb: ProcessBuilder): Resource[IO, Process[IO]] =
-    trace.traceResource(s"bazel command ${(pb.command :: pb.args).map(x => s"'$x'").mkString(" ")}") {
-      pb.spawn[IO]
+  def run(b: Builder): Resource[IO, CatsProcess[IO]] =
+    trace.traceResource(s"bazel command ${(b.cmd :: b.args).map(x => s"'$x'").mkString(" ")}") {
+      CatsProcess.spawnFull[IO](b.cmd :: b.args, b.cwd).flatTap { cp =>
+        Resource.makeCase(cp.pid) {
+          case (pid, ExitCase.Canceled) =>
+            outputBase match {
+              case None => trace.logger.logWarn(s"No output base for task, cannot interrupt server")
+              case Some(p) =>
+                trace.logger.logInfo(s"Bazel task cancelled, reading the server's pid from ${p}") *>
+                  Files[IO]
+                    .readAll(p / "server" / "server.pid.txt")
+                    .through(pipe)
+                    .compile
+                    .string
+                    .map(_.toInt)
+                    .flatMap { pid =>
+                      trace.logger.logInfo(s"Found server pid $pid, sending SIGINTs until the client exists") *>
+                        IO.race(
+                          Stream
+                            .repeatEval {
+                              CatsProcess.spawn[IO]("kill", "-2", pid.toString).use(_.statusCode)
+                            }
+                            .meteredStartImmediately(100.millis)
+                            .compile
+                            .drain,
+                          cp.statusCode.map(_.code).flatMap { code =>
+                            trace.logger.logInfo(s"Server process $pid exited with code $code")
+                          }
+                        ).void
+                    }
+                    // In case of file not found, the server is already dead
+                    .attempt
+                    .flatMap {
+                      case Left(e)  => trace.logger.logWarn(s"Error while trying to interrupt server: $e")
+                      case Right(_) => IO.unit
+                    }
+            }
+          case _ => IO.unit
+        }
+      }
     }
 
   def builder(cmd: String, printLogs: Boolean, args: String*) = {
     val ob = outputBase.map(x => s"--output_base=${x.toString}").toList
-    ProcessBuilder(
+    Builder(
       "bazel",
-      ob ++ (cmd :: List("--noshow_loading_progress", "--noshow_progress").filter(_ => !printLogs)) ++ args.toList
+      ob ++ (cmd :: List("--noshow_loading_progress", "--noshow_progress").filter(_ => !printLogs)) ++ args.toList,
+      Some(rootDir)
     )
-      .withWorkingDirectory(rootDir)
   }
 
   def runAndParse[A <: GeneratedMessage](cmd: String, args: String*)(implicit ev: GeneratedMessageCompanion[A]): IO[A] = {
@@ -40,7 +87,7 @@ class BazelAPI(
           .toInputStreamResource(proc.stdout)
           .use(is => IO.interruptibleMany(ev.parseFrom(is)))
 
-        fg <& proc.stderr.through(pipe).evalMap(logger.printStdErr).compile.drain <* proc.exitValue.flatMap {
+        fg <& proc.stderr.through(pipe).evalMap(logger.printStdErr).compile.drain <* proc.statusCode.map(_.code).flatMap {
           case 0 => IO.unit
           case n => IO.raiseError(new Exception(s"Bazel command failed with exit code $n"))
         }
@@ -84,7 +131,7 @@ class BazelAPI(
   def runUnitTask(op: String, cmds: String*): IO[Int] =
     run(builder(op, printLogs = true, cmds*)).use { p =>
       Stream
-        .eval(p.exitValue)
+        .eval(p.statusCode.map(_.code))
         .concurrently(p.stdout.through(pipe).evalMap(logger.printStdOut))
         .concurrently(p.stderr.through(pipe).evalMap(logger.printStdErr))
         .compile
@@ -92,7 +139,15 @@ class BazelAPI(
     }
 
   def runBuild(cmds: String*): IO[Int] = {
-    runUnitTask("build", (cmds.toList ++ buildArgs.toList)*)
+    runUnitTask(
+      "build",
+      (cmds.toList ++ buildArgs.toList ++ List(
+        "--curses=no",
+        "--isatty=true",
+        "--color=yes",
+        "--build_manual_tests=true"
+      ))*
+    )
   }
 
   def runFetch(cmds: String*): IO[Int] =

@@ -10,18 +10,13 @@ trait RequestLifecycle {
 }
 
 object RequestLifecycle {
-  def make: IO[RequestLifecycle] = {
-    IO.ref(Map.empty[RpcId, IO[Unit]]).map { ref =>
-      new RequestLifecycle {
-        override def run[A](id: RpcId, request: IO[A]): IO[Option[A]] =
-          IO.deferred[Unit].flatMap { cancelMe =>
-            ref.update(_ + (id -> cancelMe.complete(()).void)) *>
-              IO.race(request.map(_.some), cancelMe.get.as(None)).map(_.merge)
-          }
+  def make(ct: CancellableTask): RequestLifecycle = {
+    new RequestLifecycle {
+      override def run[A](id: RpcId, request: IO[A]): IO[Option[A]] =
+        ct.start(id.value.toString(), request).flatten
 
-        override def cancel(id: RpcId): IO[Unit] =
-          ref.modify(m => (m - id, m.get(id))).flatMap(_.traverse_(_.void))
-      }
+      override def cancel(id: RpcId): IO[Unit] =
+        ct.cancel(id.value.toString())
     }
   }
 }
