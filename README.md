@@ -17,7 +17,8 @@ A non-exhaustive list of features that work:
 * Minimal build target definitons using ijars over jars.
 * Automatic reload on build change.
 * IntelliJ support (lightly tested).
-* Task cancellation.
+* BSP Task cancellation.
+* Cancellation of stale builds, saving a file mid-build restarts the build.
 
 Things that I will be working that Mezel doesn't support yet:
 * Caching of output jars/ijars from local targets (improves DX on big refactorings since transitive jars will persist through bazel output extermination)
