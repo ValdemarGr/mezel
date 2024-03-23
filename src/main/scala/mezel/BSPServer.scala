@@ -342,7 +342,7 @@ class BspServerOps(
       // strategy is to first list all current files in cache dir
       // then atomically move new semantic db files into the cache dir
       //Files[IO].tempDirectory.use { tmpDir =>
-      val tmpFile = tmpDir / "sem"
+      //val tmpFile = tmpDir / "sem"
       ls.evalMap { p =>
         val fileRelativeToTargetRoot = actualDir.absolute.relativize(p.absolute)
         val targetFile = cacheDir / fileRelativeToTargetRoot
