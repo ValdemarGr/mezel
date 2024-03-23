@@ -341,20 +341,21 @@ class BspServerOps(
 
       // strategy is to first list all current files in cache dir
       // then atomically move new semantic db files into the cache dir
-      Files[IO].tempDirectory.use { tmpDir =>
-        val tmpFile = tmpDir / "sem"
-        ls.evalMap { p =>
-          val fileRelativeToTargetRoot = actualDir.absolute.relativize(p.absolute)
-          val targetFile = cacheDir / fileRelativeToTargetRoot
-          val fa = targetFile.parent.traverse_(Files[IO].createDirectories) *>
-            Files[IO].copy(p.absolute, tmpFile, CopyFlags(CopyFlag.ReplaceExisting)) *>
-            Files[IO].move(tmpFile, targetFile, CopyFlags(CopyFlag.ReplaceExisting, CopyFlag.AtomicMove))
+      //Files[IO].tempDirectory.use { tmpDir =>
+      val tmpFile = tmpDir / "sem"
+      ls.evalMap { p =>
+        val fileRelativeToTargetRoot = actualDir.absolute.relativize(p.absolute)
+        val targetFile = cacheDir / fileRelativeToTargetRoot
+        val fa = targetFile.parent.traverse_(Files[IO].createDirectories) *>
+          Files[IO].copy(p.absolute, targetFile, CopyFlags(CopyFlag.ReplaceExisting))
+          //Files[IO].copy(p.absolute, tmpFile, CopyFlags(CopyFlag.ReplaceExisting))// *>
+          //Files[IO].move(tmpFile, targetFile, CopyFlags(CopyFlag.ReplaceExisting, CopyFlag.AtomicMove))
 
-          fa
-        }.compile
-          .drain
-      }
+        fa
+      }.compile
+        .drain
     }
+    //}
 
   def mkTasks(rootUri: SafeUri) = {
     outputBaseFromSource.map { ob =>
