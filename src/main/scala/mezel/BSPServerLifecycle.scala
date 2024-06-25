@@ -38,7 +38,7 @@ class BSPServerLifecycle(
       deps.ct
     )
 
-  def runRequest(id: Option[RpcId])(res: IO[Either[BspResponseError, Option[Json]]]): IO[Unit] = {
+  def runRequest(id: Option[RpcId])(res: IO[Either[BspResponseError, Option[Json]]]): IO[Option[Json]] = {
     val handleError: IO[Option[Response]] =
       res.map {
         case Left(err)    => Some(Response("2.0", id, None, Some(err.responseError)))
@@ -53,7 +53,7 @@ class BSPServerLifecycle(
 
     val leased = id.map(id => deps.rl.run(id, handleError).map(_.flatten)).getOrElse(handleError)
 
-    leased.flatMap(_.map(_.asJson).traverse_(deps.output.send))
+    leased.map(_.map(_.asJson))
   }
 
   def read(stdin: fs2.Stream[IO, Byte]) =
@@ -73,7 +73,7 @@ class BSPServerLifecycle(
       .observe(Files[IO].writeAll(toMetals))
       .through(stdout)
 
-  def handleRequest(x: Request)(implicit Exit: Raise[IO, Unit]) = {
+  def handleRequest(x: Request)(implicit Exit: Raise[IO, Unit]): IO[Either[BspResponseError, Option[Json]]] = {
     val originId = x.params.flatMap(_.asObject).flatMap(_.apply("originId")).flatMap(_.asString)
 
     def expect[A: Decoder]: IO[A] =
@@ -84,41 +84,39 @@ class BSPServerLifecycle(
     val lg = logger(originId)
     val trace = Trace.in(s"${x.id.map(_.value.toString()).getOrElse("?")}: ${x.method}", lg)
 
-    runRequest(x.id) {
-      deps.C.use[BspResponseError] { implicit R =>
-        val ops = makeOps(trace, lg)
-        trace.trace("root") {
-          x.method match {
-            case "build/initialize"       => expect[InitializeBuildParams].flatMap(ops.initalize)
-            case "build/initialized"      => IO.pure(None)
-            case "workspace/buildTargets" => ops.buildTargets
-            case "buildTarget/scalacOptions" =>
-              expect[ScalacOptionsParams].flatMap(p => ops.scalacOptions(p.targets.map(_.uri)))
-            case "buildTarget/javacOptions" => IO.pure(Some(ScalacOptionsResult(Nil).asJson))
-            case "buildTarget/sources" =>
-              expect[SourcesParams].flatMap(sps => ops.sources(sps.targets.map(_.uri)))
-            case "buildTarget/dependencySources" =>
-              expect[DependencySourcesParams].flatMap(dsp => ops.dependencySources(dsp.targets.map(_.uri)))
-            case "buildTarget/scalaMainClasses" =>
-              IO.pure(Some(ScalaMainClassesResult(Nil, None).asJson))
-            case "buildTarget/jvmRunEnvironment" =>
-              IO.pure(Some(JvmRunEnvironmentResult(Nil).asJson))
-            case "buildTarget/scalaTestClasses" =>
-              IO.pure(Some(ScalaTestClassesResult(Nil).asJson))
-            case "buildTarget/compile" =>
-              expect[CompileParams].flatMap(p => ops.compile(p.targets.map(_.uri)))
-            case "buildTarget/resources" =>
-              expect[ResourcesParams]
-                .map(p => Some(ResourcesResult(p.targets.map(t => ResourcesItem(t, Nil))).asJson))
-            // case "workspace/reload" =>
-            // state.getAndSet(BspState.empty).flatMap { os =>
-            //   os.initReq.traverse(ops.initalize) >> ops.buildTargets.as(None)
-            // }
-            case "build/exit" | "build/shutdown" => Exit.raise(())
-            case "$/cancelRequest" =>
-              expect[CancelParams].flatMap(p => deps.rl.cancel(p.id)).as(None)
-            case m => IO.raiseError(new RuntimeException(s"Unknown method: $m"))
-          }
+    deps.C.use[BspResponseError] { implicit R =>
+      val ops = makeOps(trace, lg)
+      trace.trace("root") {
+        x.method match {
+          case "build/initialize"       => expect[InitializeBuildParams].flatMap(ops.initalize)
+          case "build/initialized"      => IO.pure(None)
+          case "workspace/buildTargets" => ops.buildTargets
+          case "buildTarget/scalacOptions" =>
+            expect[ScalacOptionsParams].flatMap(p => ops.scalacOptions(p.targets.map(_.uri)))
+          case "buildTarget/javacOptions" => IO.pure(Some(ScalacOptionsResult(Nil).asJson))
+          case "buildTarget/sources" =>
+            expect[SourcesParams].flatMap(sps => ops.sources(sps.targets.map(_.uri)))
+          case "buildTarget/dependencySources" =>
+            expect[DependencySourcesParams].flatMap(dsp => ops.dependencySources(dsp.targets.map(_.uri)))
+          case "buildTarget/scalaMainClasses" =>
+            IO.pure(Some(ScalaMainClassesResult(Nil, None).asJson))
+          case "buildTarget/jvmRunEnvironment" =>
+            IO.pure(Some(JvmRunEnvironmentResult(Nil).asJson))
+          case "buildTarget/scalaTestClasses" =>
+            IO.pure(Some(ScalaTestClassesResult(Nil).asJson))
+          case "buildTarget/compile" =>
+            expect[CompileParams].flatMap(p => ops.compile(p.targets.map(_.uri)))
+          case "buildTarget/resources" =>
+            expect[ResourcesParams]
+              .map(p => Some(ResourcesResult(p.targets.map(t => ResourcesItem(t, Nil))).asJson))
+          // case "workspace/reload" =>
+          // state.getAndSet(BspState.empty).flatMap { os =>
+          //   os.initReq.traverse(ops.initalize) >> ops.buildTargets.as(None)
+          // }
+          case "build/exit" | "build/shutdown" => Exit.raise(())
+          case "$/cancelRequest" =>
+            expect[CancelParams].flatMap(p => deps.rl.cancel(p.id)).as(None)
+          case m => IO.raiseError(new RuntimeException(s"Unknown method: $m"))
         }
       }
     }
@@ -131,9 +129,13 @@ class BSPServerLifecycle(
     deps.C
       .use[Unit] { implicit Exit =>
         val consume =
-          read(stdin).parEvalMapUnbounded { req =>
-            handleRequest(req)
-          }
+          read(stdin)
+            .parEvalMapUnbounded { req =>
+              runRequest(req.id) {
+                handleRequest(req)
+              }
+            }
+            .evalMap(_.traverse_(deps.output.send))
 
         logger(None).logInfo(s"Starting Mezel server, logs will be at ${deps.tmpDir}") >>
           (deps.output.stream.concurrently(consume)).through(write(stdout)).compile.drain
