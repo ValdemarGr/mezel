@@ -34,48 +34,6 @@ class GraphWatcher(trace: Trace) {
     }
   }
 
-  def simplyfyEvents(events: Chunk[(EvType, Path)]): Map[Path, EvType] =
-    events.foldLeft(Map.empty[Path, EvType]) { case (m, (et, p)) =>
-      m.get(p) match {
-        case None      => m + (p -> et)
-        case Some(et0) =>
-          // et0 then et
-          import EvType._
-          (et0, et) match {
-            case (_, Deleted)  => m - p
-            case (_, Created)  => m + (p -> Modified)
-            case (_, Modified) => m + (p -> Modified)
-          }
-      }
-    }
-
-  def eliminateRedundant(events: Chunk[(EvType, Path)]): Chunk[(EvType, Path)] = {
-    val m = events.toList.zipWithIndex.groupMap { case ((_, p), _) => p } { case ((et, _), i) => (et, i) }
-
-    Chunk.from {
-      m.toList.mapFilter { case (k, vs) =>
-        val sorted = vs.sortBy { case (_, i) => i }
-        // some editors write a file by first deleting it and then creating it
-        // if first is a deleted and it ends with a created, it is a modified
-        // if the first event is created and last is deleted, we ignore it
-        val (hdEt, _) = sorted.head
-        val (lastEt, _) = sorted.last
-
-        (hdEt, lastEt) match {
-          case (EvType.Deleted, EvType.Created) => Some((EvType.Modified, k))
-          case (EvType.Created, EvType.Deleted) => None
-          case _                                => Some((lastEt, k))
-        }
-      }
-    }
-  }
-
-  def filterFSEvents(events: Chunk[(EvType, Path)]): IO[Chunk[(EvType, Path)]] =
-    events.filterA {
-      case (EvType.Modified | EvType.Created, p) => Files[IO].exists(p)
-      case (EvType.Deleted, p)                   => Files[IO].exists(p).map(!_)
-    }
-
   def didChange(et: EvType, p: Path): IO[Boolean] = {
     val fn = p.fileName.toString
     // If it's a modified scala file, we can just skip it, everything else causes a build change
@@ -96,36 +54,6 @@ class GraphWatcher(trace: Trace) {
       }
     }
   }
-
-  def computeChange(events: Chunk[(EvType, Path)]): IO[Boolean] = {
-    val m = simplyfyEvents(events)
-
-    trace.logger.logInfo(s"${events.size} events unconsed ${events}") *>
-      trace.logger.logInfo(s"eliminated ${events.size - m.size} uninteresting events ${m}") *>
-      m.toList.existsM { case (p, et) => didChange(et, p) }
-  }
-
-  def buildDidChange(events: Chunk[(EvType, Path)]): IO[Boolean] =
-    events.existsM { case (et, p) =>
-      val fn = p.fileName.toString
-      // If it's a modified scala file, we can just skip it, everything else causes a build change
-      val isSourceMod = (fn.endsWith(".scala") || fn.endsWith(".sc")) && et == EvType.Modified
-      // https://github.com/vim/vim/issues/5145#issuecomment-547768070
-      // Vim creates files with ~ at the end and files named 4913 (and incrementing by 123)
-      val isVimFile = fn.endsWith("~") || fn.toIntOption.exists(x => (x - 4913) % 123 === 0)
-
-      val toSkip = isSourceMod || isVimFile
-
-      if (toSkip) IO.pure(false)
-      else {
-        et match {
-          // If it is created but doesn't exist, we can skip it
-          case EvType.Modified | EvType.Created => Files[IO].exists(p)
-          // If it is deleted but exists, we can skip it
-          case EvType.Deleted => Files[IO].exists(p).map(!_)
-        }
-      }
-    }
 
   def startWatcher(
       paths: NonEmptyList[Path]
