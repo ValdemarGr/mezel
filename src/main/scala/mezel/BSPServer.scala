@@ -317,6 +317,9 @@ class BspServerOps(
   def derivedExecRoot: IO[Path] =
     derivedEnv.map(_.apply("execution_root")).map(Path(_))
 
+  def derivedWorkspace: IO[Path] =
+    derivedEnv.map(_.apply("workspace")).map(Path(_))
+
   def diagnosticsFiles =
     cached("diagnosticsFiles")(_.diagnosticsFiles) {
       tasks.flatMap(_.diagnosticsFiles.map(_.toMap))
@@ -638,11 +641,13 @@ class BspServerOps(
       scos <- readScalacOptions
       execRoot <- derivedExecRoot
       cacheDir <- cacheFolder
+      workspace <- derivedWorkspace
       options <- scos.toList.traverse { case (label, sco) =>
         semanticdbCachePath(sco.targetroot).map { semanticdbDir =>
           val semanticDBFlags =
             if (sco.compilerVersion.major === "2") {
               List(
+                s"-P:semanticdb:sourceroot:${workspace.toString}",
                 s"-P:semanticdb:targetroot:${semanticdbDir.toString}",
                 "-Xplugin-require:semanticdb",
                 s"-Xplugin:${(execRoot / Path(sco.semanticdbPlugin))}"
