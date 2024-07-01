@@ -31,9 +31,28 @@ class BazelAPI(
 
   def run(b: Builder): Resource[IO, CatsProcess[IO]] =
     trace.traceResource(s"bazel command ${(b.cmd :: b.args).map(x => s"'$x'").mkString(" ")}") {
-      CatsProcess.spawnFull[IO](b.cmd :: b.args, b.cwd).flatTap { cp =>
+      val p = CatsProcess.spawnFull[IO](b.cmd :: b.args, b.cwd)
+
+      val p2 = Resource
+        .make(p.allocated) { case (proc, release) =>
+          val to = 10.seconds
+          trace.logger.logInfo("shutting down process") *>
+            IO.race(release, IO.sleep(to)).flatMap {
+              case Left(_) => IO.unit
+              case Right(_) =>
+                val to2 = 2.seconds
+                trace.logger.logWarn(s"Process did not terminate within ${to.toSeconds}s, killing it") *>
+                  IO.race(proc.kill.start.map(_.joinWithNever), IO.sleep(to2)).flatMap {
+                    case Right(_) => trace.logger.logWarn(s"Process did not terminate within ${to2}s after kill, giving up")
+                    case Left(_)  => trace.logger.logInfo(s"Process terminated after kill")
+                  }
+            }
+        }
+        .map { case (p, _) => p }
+
+      p2.flatTap { cp =>
         Resource.makeCase(cp.pid) {
-          case (pid, ExitCase.Canceled) =>
+          case (pid0, ExitCase.Canceled) =>
             outputBase match {
               case None => trace.logger.logWarn(s"No output base for task, cannot interrupt server")
               case Some(p) =>
@@ -49,7 +68,8 @@ class BazelAPI(
                         IO.race(
                           Stream
                             .repeatEval {
-                              CatsProcess.spawn[IO]("kill", "-2", pid.toString).use(_.statusCode)
+                              trace.logger.logInfo(s"Sending SIGINT to server $pid") *>
+                                CatsProcess.spawn[IO]("kill", "-2", pid.toString).use(_.statusCode)
                             }
                             .meteredStartImmediately(100.millis)
                             .compile
@@ -63,7 +83,7 @@ class BazelAPI(
                     .attempt
                     .flatMap {
                       case Left(e)  => trace.logger.logWarn(s"Error while trying to interrupt server: $e")
-                      case Right(_) => IO.unit
+                      case Right(_) => trace.logger.logInfo(s"Shutting down client process ${pid0}")
                     }
             }
           case _ => IO.unit

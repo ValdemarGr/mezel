@@ -79,7 +79,6 @@ object CatsProcess {
 
         _ <- F.delay(builder.start())
         process <- processD.get
-        _ <- F.delay("Got process")
       } yield process
 
       // On resource release, we terminate the process (signal) and then wait for the actual exit

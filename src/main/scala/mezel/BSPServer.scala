@@ -591,7 +591,7 @@ class BspServerOps(
             doCompile.compile.drain <*
             trace.logger.logInfo(s"finished compiling with id $id")
         }.onCancel(trace.logger.logInfo(s"cancelled compilation with id $id"))
-        _ <- ct.start(compilationTaskKey, prg)
+        _ <- ct.start(trace, compilationTaskKey, prg)
       } yield ()
 
     loggedProgram.as {

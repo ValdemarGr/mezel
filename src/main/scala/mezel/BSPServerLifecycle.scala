@@ -2,7 +2,7 @@ package mezel
 
 import fs2.io.file._
 import fs2.Chunk
-import cats.effect._
+import cats.effect.{Trace => _, _}
 import cats.effect.std._
 import fs2.concurrent.SignallingRef
 import fs2.concurrent.Channel
@@ -38,7 +38,7 @@ class BSPServerLifecycle(
       deps.ct
     )
 
-  def runRequest(id: Option[RpcId])(res: IO[Either[BspResponseError, Option[Json]]]): IO[Option[Json]] = {
+  def runRequest(trace: Trace, id: Option[RpcId])(res: IO[Either[BspResponseError, Option[Json]]]): IO[Option[Json]] = {
     val handleError: IO[Option[Response]] =
       res.map {
         case Left(err)    => Some(Response("2.0", id, None, Some(err.responseError)))
@@ -51,7 +51,7 @@ class BSPServerLifecycle(
           }
       }
 
-    val leased = id.map(id => deps.rl.run(id, handleError).map(_.flatten)).getOrElse(handleError)
+    val leased = id.map(id => deps.rl.run(trace, id, handleError).map(_.flatten)).getOrElse(handleError)
 
     leased.map(_.map(_.asJson))
   }
@@ -73,16 +73,11 @@ class BSPServerLifecycle(
       .observe(Files[IO].writeAll(toMetals))
       .through(stdout)
 
-  def handleRequest(x: Request)(implicit Exit: Raise[IO, Unit]): IO[Either[BspResponseError, Option[Json]]] = {
-    val originId = x.params.flatMap(_.asObject).flatMap(_.apply("originId")).flatMap(_.asString)
-
+  def handleRequest(trace: Trace, lg: Logger, x: Request)(implicit Exit: Raise[IO, Unit]): IO[Either[BspResponseError, Option[Json]]] = {
     def expect[A: Decoder]: IO[A] =
       IO.fromOption(x.params)(new RuntimeException(s"No params for method ${x.method}"))
         .map(_.as[A])
         .rethrow
-
-    val lg = logger(originId)
-    val trace = Trace.in(s"${x.id.map(_.value.toString()).getOrElse("?")}: ${x.method}", lg)
 
     deps.C.use[BspResponseError] { implicit R =>
       val ops = makeOps(trace, lg)
@@ -115,7 +110,7 @@ class BSPServerLifecycle(
           // }
           case "build/exit" | "build/shutdown" => Exit.raise(())
           case "$/cancelRequest" =>
-            expect[CancelParams].flatMap(p => deps.rl.cancel(p.id)).as(None)
+            expect[CancelParams].flatMap(p => deps.rl.cancel(trace, p.id)).as(None)
           case m => IO.raiseError(new RuntimeException(s"Unknown method: $m"))
         }
       }
@@ -131,8 +126,11 @@ class BSPServerLifecycle(
         val consume =
           read(stdin)
             .parEvalMapUnbounded { req =>
-              runRequest(req.id) {
-                handleRequest(req)
+              val originId = req.params.flatMap(_.asObject).flatMap(_.apply("originId")).flatMap(_.asString)
+              val lg = logger(originId)
+              val trace = Trace.in(s"${req.id.map(_.value.toString()).getOrElse("?")}: ${req.method}", lg)
+              runRequest(trace, req.id) {
+                handleRequest(trace, lg, req)
               }
             }
             .evalMap(_.traverse_(deps.output.send))
