@@ -36,7 +36,7 @@ class BazelAPI(
       val p2 = Resource
         .make(p.allocated) { case (proc, release) =>
           val to = 10.seconds
-          trace.logger.logInfo("shutting down process") *>
+          trace.trace("Shutting down process") {
             IO.race(release, IO.sleep(to)).flatMap {
               case Left(_) => IO.unit
               case Right(_) =>
@@ -47,6 +47,7 @@ class BazelAPI(
                     case Left(_)  => trace.logger.logInfo(s"Process terminated after kill")
                   }
             }
+          }
         }
         .map { case (p, _) => p }
 
