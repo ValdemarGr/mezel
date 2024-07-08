@@ -344,21 +344,21 @@ class BspServerOps(
 
       // strategy is to first list all current files in cache dir
       // then atomically move new semantic db files into the cache dir
-      //Files[IO].tempDirectory.use { tmpDir =>
-      //val tmpFile = tmpDir / "sem"
+      // Files[IO].tempDirectory.use { tmpDir =>
+      // val tmpFile = tmpDir / "sem"
       ls.evalMap { p =>
         val fileRelativeToTargetRoot = actualDir.absolute.relativize(p.absolute)
         val targetFile = cacheDir / fileRelativeToTargetRoot
         val fa = targetFile.parent.traverse_(Files[IO].createDirectories) *>
           Files[IO].copy(p.absolute, targetFile, CopyFlags(CopyFlag.ReplaceExisting))
-          //Files[IO].copy(p.absolute, tmpFile, CopyFlags(CopyFlag.ReplaceExisting))// *>
-          //Files[IO].move(tmpFile, targetFile, CopyFlags(CopyFlag.ReplaceExisting, CopyFlag.AtomicMove))
+        // Files[IO].copy(p.absolute, tmpFile, CopyFlags(CopyFlag.ReplaceExisting))// *>
+        // Files[IO].move(tmpFile, targetFile, CopyFlags(CopyFlag.ReplaceExisting, CopyFlag.AtomicMove))
 
         fa
       }.compile
         .drain
     }
-    //}
+    // }
 
   def mkTasks(rootUri: SafeUri) = {
     outputBaseFromSource.map { ob =>
@@ -379,36 +379,38 @@ class BspServerOps(
         if s.workspaceRoot.isDefined then IO.raiseError(new Exception("already initialized"))
         else makeEnv.flatMap(env => state.update(_.copy(initReq = Some(msg), sourceEnv = Some(env))))
       } >> {
-      val watcherTrace = trace.nested("watcher")
-      val gw = GraphWatcher(watcherTrace)
-      sup
-        .supervise {
-          val didChange =
-            cache.clear *>
-              sendNotification(
-                "buildTarget/didChange",
-                DidChangeBuildTarget(
-                  List(
-                    BuildTargetEvent(BuildTargetIdentifier(msg.rootUri), BuildTargetEventKind.Created)
+      trace
+        .nested("watcher") {
+          val gw = GraphWatcher(trace)
+          sup
+            .supervise {
+              val didChange =
+                cache.clear *>
+                  sendNotification(
+                    "buildTarget/didChange",
+                    DidChangeBuildTarget(
+                      List(
+                        BuildTargetEvent(BuildTargetIdentifier(msg.rootUri), BuildTargetEventKind.Created)
+                      )
+                    )
                   )
-                )
-              )
-          lazy val go: IO[Unit] =
-            gw.startWatcher(NonEmptyList.one(uriToPath(msg.rootUri)) /*watchDirectories*/ )
-              .evalTap { _ =>
-                watcherTrace.logger.logInfo(s"something changed, clearing all the caches") *> didChange
-              }
-              .handleErrorWith { e =>
-                Stream.eval {
-                  watcherTrace.logger.logWarn(s"watcher failed with $e, reloading to be consistent") *>
-                    didChange *>
-                    go
-                }
-              }
-              .compile
-              .drain
+              lazy val go: IO[Unit] =
+                gw.startWatcher(NonEmptyList.one(uriToPath(msg.rootUri)) /*watchDirectories*/ )
+                  .evalTap { _ =>
+                    trace.logger.logInfo(s"something changed, clearing all the caches") *> didChange
+                  }
+                  .handleErrorWith { e =>
+                    Stream.eval {
+                      trace.logger.logWarn(s"watcher failed with $e, reloading to be consistent") *>
+                        didChange *>
+                        go
+                    }
+                  }
+                  .compile
+                  .drain
 
-          go
+              go
+            }
         }
         .as {
           Some {

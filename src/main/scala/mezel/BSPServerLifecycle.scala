@@ -73,6 +73,15 @@ class BSPServerLifecycle(
       .observe(Files[IO].writeAll(toMetals))
       .through(stdout)
 
+  enum TaskType {
+    case Concurrent
+    case Sequential
+  }
+  def taskType(method: String): TaskType = method match {
+    case "build/exit" | "build/shutdown" | "$/cancelRequest" => TaskType.Concurrent
+    case _                                                   => TaskType.Sequential
+  }
+
   def handleRequest(trace: Trace, lg: Logger, x: Request)(implicit Exit: Raise[IO, Unit]): IO[Either[BspResponseError, Option[Json]]] = {
     def expect[A: Decoder]: IO[A] =
       IO.fromOption(x.params)(new RuntimeException(s"No params for method ${x.method}"))
@@ -125,13 +134,25 @@ class BSPServerLifecycle(
       .use[Unit] { implicit Exit =>
         val consume =
           read(stdin)
-            .parEvalMapUnbounded { req =>
+            .map { req =>
               val originId = req.params.flatMap(_.asObject).flatMap(_.apply("originId")).flatMap(_.asString)
               val lg = logger(originId)
-              val trace = Trace.in(s"${req.id.map(_.value.toString()).getOrElse("?")}: ${req.method}", lg)
-              runRequest(trace, req.id) {
-                handleRequest(trace, lg, req)
-              }
+              val fa: IO[Option[Json]] =
+                Trace.in(s"${req.id.map(_.value.toString()).getOrElse("?")}: ${req.method}", lg).flatMap { trace =>
+                  runRequest(trace, req.id) {
+                    handleRequest(trace, lg, req)
+                  }
+                }
+
+              fa -> taskType(req.method)
+            }
+            .parEvalMapUnbounded {
+              case (fa, TaskType.Concurrent)   => fa.map(_.asRight)
+              case (fa, TaskType.Sequential) => IO.pure(Left(fa))
+            }
+            .evalMap {
+              case Right(result) => IO.pure(result)
+              case Left(fa)      => fa
             }
             .evalMap(_.traverse_(deps.output.send))
 
