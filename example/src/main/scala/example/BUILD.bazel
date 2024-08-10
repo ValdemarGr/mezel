@@ -6,7 +6,8 @@ scala_library(
     visibility = ["//visibility:public"],
     deps = [
       "@maven//:org_typelevel_cats_effect_2_13",
-      "//example/src/main/scala/example/dep"
+      "//example/src/main/scala/example/dep",
+      "@hxl//:hxl"
     ],
 )
 

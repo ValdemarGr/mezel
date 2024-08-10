@@ -1,1 +1,1 @@
-{"argv":["bazel", "run", "@mezel//rules:mezel_binary", "--"],"bspVersion":"2.0.0","languages":["scala"],"name":"Mezel","version":"1.0.0"}
+{"argv":["bash", "-c", "bazel run //:mk_mezel -- /tmp/startmezel && exec /tmp/startmezel"],"bspVersion":"2.0.0","languages":["scala"],"name":"Mezel","version":"1.0.0"}

@@ -644,13 +644,17 @@ class BspServerOps(
       execRoot <- derivedExecRoot
       cacheDir <- cacheFolder
       workspace <- derivedWorkspace
+      ob <- outputBaseFromSource
       options <- scos.toList.traverse { case (label, sco) =>
         semanticdbCachePath(sco.targetroot).map { semanticdbDir =>
           val semanticDBFlags =
             if (sco.compilerVersion.major === "2") {
               List(
-                s"-P:semanticdb:sourceroot:${workspace.toString}",
-                s"-P:semanticdb:targetroot:${semanticdbDir.toString}",
+                s"-P:semanticdb:sourceroot:${sco.workspaceRoot.map(ob / _).getOrElse(workspace).toString}",
+                s"-P:semanticdb:targetroot:${
+                  execRoot / Path(sco.targetroot)
+                //semanticdbDir.toString
+                }",
                 "-Xplugin-require:semanticdb",
                 s"-Xplugin:${(execRoot / Path(sco.semanticdbPlugin))}"
               )
@@ -697,7 +701,7 @@ class BspServerOps(
       ) ::
         bts.toList.map { case (label, bt) =>
           val dir = bt.workspaceRoot match {
-            case None => pathFullToUri(wsr, Path(bt.directory))
+            case None    => pathFullToUri(wsr, Path(bt.directory))
             case Some(x) => pathToUri(ob / x / Path(bt.directory))
           }
 

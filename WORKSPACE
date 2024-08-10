@@ -1,7 +1,7 @@
 workspace(name = "mezel")
 
 load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
-load("@bazel_tools//tools/build_defs/repo:git.bzl", "git_repository")
+load("@bazel_tools//tools/build_defs/repo:git.bzl", "new_git_repository", "git_repository")
 
 skylib_version = "1.0.3"
 
@@ -73,6 +73,7 @@ load("@rules_jvm_external//:defs.bzl", "maven_install")
 maven_install(
     artifacts = [
         "org.typelevel:cats-effect_2.13:3.5.2",
+        "org.typelevel:kind-projector_2.13.12:0.13.2",
     ],
     repositories = [
         "https://maven.google.com",
@@ -84,6 +85,30 @@ maven_install(
 load("@maven//:defs.bzl", "pinned_maven_install")
 pinned_maven_install()
 
-
 load("//rules:load_mezel.bzl", "load_mezel")
 load_mezel()
+
+new_git_repository(
+   name = "hxl",
+   commit = "4dcca3c131c0d3b35a49252fa6d26dda7bc17abf",
+   shallow_since = "1710012503 +0100",
+   remote = "git@github.com:casehubdk/hxl",
+   build_file_content = """
+load("@io_bazel_rules_scala//scala:scala.bzl", "scala_library")
+scala_library(
+    name = "hxl",
+    srcs = glob(["modules/core/src/main/scala/**/*.scala"]),
+    visibility = ["//visibility:public"],
+    plugins = [
+      "@maven//:org_typelevel_kind_projector_2_13_12",
+    ],
+    deps = [
+      "@maven//:org_typelevel_cats_effect_2_13",
+      "@maven//:org_typelevel_cats_core_2_13"
+    ],
+)
+""",
+   workspace_file_content = """
+workspace(name = "hxl")
+"""
+)

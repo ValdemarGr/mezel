@@ -12,6 +12,7 @@ object AspectTypes {
       targetroot: String,
       outputClassJar: String,
       compilerVersion: ScalaVersion,
+      workspaceRoot: Option[String]
   ) derives Decoder
 
   final case class Sources(
