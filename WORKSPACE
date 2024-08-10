@@ -41,8 +41,8 @@ http_archive(
 
 load("@io_bazel_rules_scala//:scala_config.bzl", "scala_config")
 
-# scala_config("2.13.12")
-scala_config("3.3.0")
+scala_config("2.13.12")
+# scala_config("3.3.0")
 
 load("@io_bazel_rules_scala//scala:scala.bzl", "scala_repositories")
 
@@ -72,7 +72,7 @@ load("@rules_jvm_external//:defs.bzl", "maven_install")
 
 maven_install(
     artifacts = [
-        "org.typelevel:cats-effect_3:3.5.2",
+        "org.typelevel:cats-effect_2.13:3.5.2",
     ],
     repositories = [
         "https://maven.google.com",

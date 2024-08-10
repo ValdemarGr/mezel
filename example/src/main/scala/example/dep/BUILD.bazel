@@ -5,7 +5,7 @@ scala_library(
     srcs = glob(["*.scala"]),
     visibility = ["//visibility:public"],
     deps = [
-      "@maven//:org_typelevel_cats_effect_3"
+      "@maven//:org_typelevel_cats_effect_2_13"
     ],
 )
 

@@ -106,12 +106,14 @@ def _mezel_aspect(target, ctx):
   ctx.actions.write(dependency_sources_file, json.encode(dependency_sources_content))
 
   build_target_file = ctx.actions.declare_file("{}_bsp_build_target.json".format(target.label.name))
+  t = target.label.workspace_root
   build_target_content = struct(
     javaHome = jdk[java_common.JavaRuntimeInfo].java_home,
     scalaCompilerClasspath= [x.path for x in scala_compile_classpath],
     compilerVersion= compiler_version,
     deps = [str(l) for l in direct_dep_labels],
     directory = target.label.package,
+    workspaceRoot = None if t == "" else t,
   )
   ctx.actions.write(build_target_file, json.encode(build_target_content))
 

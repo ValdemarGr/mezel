@@ -27,7 +27,8 @@ object AspectTypes {
       scalaCompilerClasspath: List[String],
       compilerVersion: ScalaVersion,
       deps: List[String],
-      directory: String
+      directory: String,
+      workspaceRoot: Option[String]
   ) derives Decoder
 
   final case class ScalaVersion(major: String, minor: String, patch: String) {

@@ -677,6 +677,7 @@ class BspServerOps(
       wsr <- workspaceRoot
       execRoot <- derivedExecRoot
       bts <- readBuildTargets
+      ob <- outputBaseFromSource
     } yield WorkspaceBuildTargetsResult {
       BuildTarget(
         id = BuildTargetIdentifier(SafeUri("workspace")),
@@ -695,10 +696,15 @@ class BspServerOps(
         data = None
       ) ::
         bts.toList.map { case (label, bt) =>
+          val dir = bt.workspaceRoot match {
+            case None => pathFullToUri(wsr, Path(bt.directory))
+            case Some(x) => pathToUri(ob / x / Path(bt.directory))
+          }
+
           BuildTarget(
             id = buildIdent(label),
             displayName = Some(label),
-            baseDirectory = Some(pathFullToUri(wsr, Path(bt.directory))),
+            baseDirectory = Some(dir),
             tags = List("library"),
             languageIds = List("scala"),
             dependencies = bt.deps.map(buildIdent),
