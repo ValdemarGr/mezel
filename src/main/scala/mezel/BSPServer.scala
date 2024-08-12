@@ -666,11 +666,12 @@ class BspServerOps(
                 semanticdbDir.toString
               )
 
+          val j = (execRoot / sco.outputClassJar)
           ScalacOptionsItem(
             buildIdent(label),
             (sco.scalacopts ++ semanticDBFlags ++ sco.plugins.map(x => s"-Xplugin:${execRoot / x}")).distinct,
             sco.classpath.map(x => pathToUri(execRoot / x)),
-            (execRoot / sco.outputClassJar).toNioPath.toUri().toString()
+            j.toNioPath.toUri().toString()
           )
         }
       }
