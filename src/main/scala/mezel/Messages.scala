@@ -77,7 +77,8 @@ final case class BuildServerCapabilities(
     buildTargetChangedProvider: Option[Boolean],
     jvmRunEnvironmentProvider: Option[Boolean],
     jvmTestEnvironmentProvider: Option[Boolean],
-    canReload: Option[Boolean]
+    canReload: Option[Boolean],
+    jvmCompileClasspathProvider: Option[Boolean]
 ) derives Codec.AsObject
 
 final case class BuildTargetIdentifier(
@@ -450,4 +451,17 @@ final case class ResourcesItem(
 
 final case class CancelParams(
   id: RpcId
+) derives Codec.AsObject
+
+final case class JvmCompileClasspathParams(
+  targets: List[BuildTargetIdentifier],
+) derives Codec.AsObject
+
+final case class JvmCompileClasspathResult(
+  items: List[JvmCompileClasspathItem]
+) derives Codec.AsObject
+
+final case class JvmCompileClasspathItem(
+  target: BuildTargetIdentifier,
+  classpath: List[SafeUri]
 ) derives Codec.AsObject

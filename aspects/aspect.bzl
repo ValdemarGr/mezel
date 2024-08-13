@@ -16,7 +16,7 @@ rule_kinds = [
 ]
 
 def _mezel_aspect(target, ctx):
-  if not ctx.rule.kind in rule_kinds:
+  if not ctx.rule.kind in rule_kinds or (ctx.attr.non_root_projects_as_build_targets == "false" and target.label.workspace_root != ""):
     return []
   print("mezel aspect for", target.label)
 
@@ -173,8 +173,27 @@ mezel_aspect = aspect(
         default = Label("@bazel_tools//tools/jdk:current_java_runtime"),
         providers = [java_common.JavaRuntimeInfo],
     ),
+    "non_root_projects_as_build_targets": attr.string(
+      default = "false",
+      values = ["true", "false"],
+    )
   },
   toolchains = [
     "@io_bazel_rules_scala//scala:toolchain_type",
   ],
+)
+
+def _mezel_rule(ctx):
+  pass
+
+mezel_rule = rule(
+  implementation = _mezel_rule,
+  attrs = {
+    "_jdk": attr.label(
+        default = Label("@bazel_tools//tools/jdk:current_java_runtime"),
+        providers = [java_common.JavaRuntimeInfo],
+    ),
+    "non_root_projects_as_build_targets": attr.string(default = "false"),
+    "deps": attr.label_list(allow_files = True, aspects=[mezel_aspect]),
+  }
 )

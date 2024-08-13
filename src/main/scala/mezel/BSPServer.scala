@@ -431,7 +431,8 @@ class BspServerOps(
                 buildTargetChangedProvider = Some(true),
                 jvmRunEnvironmentProvider = Some(true),
                 jvmTestEnvironmentProvider = Some(true),
-                canReload = Some(false)
+                canReload = Some(false),
+                jvmCompileClasspathProvider = Some(true)
               )
             ).asJson
           }
@@ -651,10 +652,9 @@ class BspServerOps(
             if (sco.compilerVersion.major === "2") {
               List(
                 s"-P:semanticdb:sourceroot:${sco.workspaceRoot.map(ob / _).getOrElse(workspace).toString}",
-                s"-P:semanticdb:targetroot:${
-                  execRoot / Path(sco.targetroot)
-                //semanticdbDir.toString
-                }",
+                s"-P:semanticdb:targetroot:${execRoot / Path(sco.targetroot)
+                  // semanticdbDir.toString
+                  }",
                 "-Xplugin-require:semanticdb",
                 s"-Xplugin:${(execRoot / Path(sco.semanticdbPlugin))}"
               )
@@ -676,6 +676,19 @@ class BspServerOps(
         }
       }
     } yield Some(ScalacOptionsResult(options).asJson)
+
+  def jvmCompileCLasspath(targets: List[SafeUri]): IO[Option[Json]] =
+    for {
+      execRoot <- derivedExecRoot
+      scos <- readScalacOptions
+    } yield JvmCompileClasspathResult {
+      scos.toList.map { case (label, sco) =>
+        JvmCompileClasspathItem(
+          target = buildIdent(label),
+          classpath = sco.classpath.map(x => pathToUri(execRoot / x))
+        )
+      }
+    }.asJson.some
 
   def buildTargets: IO[Option[Json]] =
     for {

@@ -1,5 +1,6 @@
 load("@io_bazel_rules_scala//scala:scala_toolchain.bzl", "scala_toolchain")
 load("//rules:make_mezel_launcher.bzl", "make_mezel_launcher")
+load("//aspects:aspect.bzl", "mezel_rule")
 
 scala_toolchain(
     name = "toolchain-scala_toolchain",

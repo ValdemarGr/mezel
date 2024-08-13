@@ -104,6 +104,8 @@ class BSPServerLifecycle(
             expect[DependencySourcesParams].flatMap(dsp => ops.dependencySources(dsp.targets.map(_.uri)))
           case "buildTarget/scalaMainClasses" =>
             IO.pure(Some(ScalaMainClassesResult(Nil, None).asJson))
+          case "buildTarget/jvmCompileClasspath" =>
+            expect[JvmCompileClasspathParams].flatMap(p => ops.jvmCompileCLasspath(p.targets.map(_.uri)))
           case "buildTarget/jvmRunEnvironment" =>
             IO.pure(Some(JvmRunEnvironmentResult(Nil).asJson))
           case "buildTarget/scalaTestClasses" =>
@@ -147,7 +149,7 @@ class BSPServerLifecycle(
               fa -> taskType(req.method)
             }
             .parEvalMapUnbounded {
-              case (fa, TaskType.Concurrent)   => fa.map(_.asRight)
+              case (fa, TaskType.Concurrent) => fa.map(_.asRight)
               case (fa, TaskType.Sequential) => IO.pure(Left(fa))
             }
             .evalMap {

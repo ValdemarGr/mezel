@@ -117,7 +117,7 @@ Create a config for Metals at `.bsp/mezel.json`:
 ```json
 {"argv":[
   "bazel", "run", "@mezel//rules:mezel_jar", "--"
-],"bspVersion":"2.0.0","languages":["scala"],"name":"Mezel","version":"1.0.0"}
+],"bspVersion":"2.1.0","languages":["scala"],"name":"Mezel","version":"1.0.0"}
 ```
 
 And that's it. Start your editor and select `Mezel` as your BSP server.
@@ -138,7 +138,7 @@ A configuration example that uses a custom toolchain and set of configuration op
   "--build-arg", "--define=no_fatal_warnings=true",
   "--aquery-arg", "--extra_toolchains=//toolchain:lsp",
   "--aquery-arg", "--define=no_fatal_warnings=true"
-],"bspVersion":"2.0.0","languages":["scala"],"name":"Mezel","version":"1.0.0"}
+],"bspVersion":"2.1.0","languages":["scala"],"name":"Mezel","version":"1.0.0"}
 ```
 
 [A bug](https://github.com/bazelbuild/bazel/issues/10653) with bazel build/aquery causes bazel to consider the convinience symlinks it creates to be considered build targets.
