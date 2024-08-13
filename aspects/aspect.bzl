@@ -18,6 +18,7 @@ rule_kinds = [
 def _mezel_aspect(target, ctx):
   if not ctx.rule.kind in rule_kinds:
     return []
+  print("mezel aspect for", target.label)
 
   attrs = ctx.rule.attr
 
@@ -55,9 +56,11 @@ def _mezel_aspect(target, ctx):
     for x in attrs.deps if BuildTargetInfo in x 
   ]
   direct_dep_labels = [x.label for x in dep_outputs]
+  print("direct dep labels", direct_dep_labels)
 
   transitive_labels = depset([target.label], transitive = [x.transitive_labels for x in dep_outputs])
   ignore = transitive_labels.to_list()
+  print("transitive labels", transitive_labels.to_list())
 
   output_class_jars = [x.class_jar.path for x in target[JavaInfo].java_outputs]
   if (len(output_class_jars) != 1):
@@ -75,8 +78,10 @@ def _mezel_aspect(target, ctx):
 
   transitive_compile_jars = target[JavaInfo].transitive_compile_time_jars.to_list()
   cp_jars = [x.path for x in transitive_compile_jars if non_self(x)]
+  print("classpath_jars", cp_jars)
   transitive_source_jars = target[JavaInfo].transitive_source_jars.to_list()
   src_jars = [x.path for x in transitive_source_jars if depcheck(x)]
+  print("src_jars", src_jars)
 
   raw_plugins = attrs.plugins if attrs.plugins else []
   plugins = [y.path for x in raw_plugins if JavaInfo in x for y in x[JavaInfo].compile_jars.to_list()]

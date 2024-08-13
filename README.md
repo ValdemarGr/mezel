@@ -115,20 +115,12 @@ make_mezel_launcher(name = "mk_mezel")
 Now we have a Mezel binary to run.
 Create a config for Metals at `.bsp/mezel.json`:
 ```json
-{
-  "argv":["bash", "-c", "bazel run //:mk_mezel -- /tmp/startmezel && exec /tmp/startmezel"],
-  "bspVersion":"2.0.0",
-  "languages":["scala"],
-  "name":"Mezel",
-  "version":"1.0.0"
-}
+{"argv":[
+  "bazel", "run", "@mezel//rules:mezel_jar", "--"
+],"bspVersion":"2.0.0","languages":["scala"],"name":"Mezel","version":"1.0.0"}
 ```
 
 And that's it. Start your editor and select `Mezel` as your BSP server.
-
-#### Why not just run mezel though the bazel java distribution?
-Running Mezel though Bazel has been causing issues with broken stdin/stdout streams (on a nix-emulated FHS system).
-To alleviate this issue, the Mezel binary is prepared by a Bazel rule and then run as a separate process.
 
 ### External dependencies
 External dependencies should work but have only been tested with [rules_jvm_external](https://github.com/bazelbuild/rules_jvm_external).
@@ -139,26 +131,26 @@ For rules_jvm_external you can flag this in your `maven_install` as seen [here](
 I suggest checking your bsp file into VCS `.bsp/mezel.json` so it works for other developers without any configuration.
 
 A configuration example that uses a custom toolchain and set of configuration options for local development (semanticdb + diagnostics + no fatal warnings):
-```starlark
-#./BUILD.bazel
-load("@mezel//rules:make_mezel_launcher.bzl", "make_mezel_launcher")
-make_mezel_launcher(
-    name = "mezel",
-    build_args = [
-        "--extra_toolchains=//toolchain:lsp",
-        "--define=no_fatal_warnings=true"
-    ],
-    aquery_args = [
-        "--extra_toolchains=//toolchain:lsp",
-        "--define=no_fatal_warnings=true"
-    ]
-)
+```json
+{"argv":[
+  "bazel", "run", "@mezel//rules:mezel_jar", "--",
+  "--build-arg", "--extra_toolchains=//toolchain:lsp",
+  "--build-arg", "--define=no_fatal_warnings=true",
+  "--aquery-arg", "--extra_toolchains=//toolchain:lsp",
+  "--aquery-arg", "--define=no_fatal_warnings=true"
+],"bspVersion":"2.0.0","languages":["scala"],"name":"Mezel","version":"1.0.0"}
 ```
 
 [A bug](https://github.com/bazelbuild/bazel/issues/10653) with bazel build/aquery causes bazel to consider the convinience symlinks it creates to be considered build targets.
 To get around this, tell bazel to ignore the symlink when running bazel operations:
 ```bash
 echo "bazel-$(basename $PWD)" >> .bazelignore
+```
+
+### Help something isn't working!
+You can try building the aspect yourself. This will emit information about what the mezel aspect finds in your build.
+```bash
+bazel build '//...' --aspects '//aspects:aspect.bzl%mezel_aspect' '--output_groups=bsp_info,bsp_info_deps'
 ```
 
 ### Metals configuration (optional)

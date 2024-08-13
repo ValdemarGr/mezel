@@ -139,7 +139,7 @@ class BazelAPI(
   def aquery(q: AnyQuery, extra: String*): IO[analysis_v2.ActionGraphContainer] = {
     val fa = runAndParse[analysis_v2.ActionGraphContainer](
       "aquery",
-      (q.render :: "--output=proto" :: extra.toList ++ aqueryArgs)*
+      ("--ui_event_filters=-debug" :: q.render :: "--output=proto" :: extra.toList ++ aqueryArgs)*
     )
     // https://github.com/bazelbuild/bazel/issues/15716
     fa.handleErrorWith { _ =>
@@ -162,7 +162,7 @@ class BazelAPI(
   def runBuild(cmds: String*): IO[Int] = {
     runUnitTask(
       "build",
-      (cmds.toList ++ buildArgs.toList ++ List(
+      ("--ui_event_filters=-debug" :: cmds.toList ++ buildArgs.toList ++ List(
         "--curses=no",
         "--isatty=true",
         "--color=yes",

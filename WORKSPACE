@@ -112,3 +112,28 @@ scala_library(
 workspace(name = "hxl")
 """
 )
+# new_local_repository(
+#    name = "hxl",
+#    path = "../hxl",
+#    # commit = "4dcca3c131c0d3b35a49252fa6d26dda7bc17abf",
+#    # shallow_since = "1710012503 +0100",
+#    # remote = "git@github.com:casehubdk/hxl",
+#    build_file_content = """
+# load("@io_bazel_rules_scala//scala:scala.bzl", "scala_library")
+# scala_library(
+#     name = "hxl",
+#     srcs = glob(["modules/core/src/main/scala/**/*.scala"]),
+#     visibility = ["//visibility:public"],
+#     plugins = [
+#       "@maven//:org_typelevel_kind_projector_2_13_12",
+#     ],
+#     deps = [
+#       "@maven//:org_typelevel_cats_effect_2_13",
+#       "@maven//:org_typelevel_cats_core_2_13"
+#     ],
+# )
+# """,
+#    workspace_file_content = """
+# workspace(name = "hxl")
+# """
+# )
