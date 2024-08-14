@@ -174,7 +174,7 @@ mezel_aspect = aspect(
         providers = [java_common.JavaRuntimeInfo],
     ),
     "non_root_projects_as_build_targets": attr.string(
-      default = "false",
+      default = "true",
       values = ["true", "false"],
     )
   },
@@ -193,7 +193,7 @@ mezel_rule = rule(
         default = Label("@bazel_tools//tools/jdk:current_java_runtime"),
         providers = [java_common.JavaRuntimeInfo],
     ),
-    "non_root_projects_as_build_targets": attr.string(default = "false"),
+    "non_root_projects_as_build_targets": attr.string(default = "true"),
     "deps": attr.label_list(allow_files = True, aspects=[mezel_aspect]),
   }
 )

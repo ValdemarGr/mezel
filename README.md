@@ -153,6 +153,17 @@ You can try building the aspect yourself. This will emit information about what 
 bazel build '//...' --aspects '//aspects:aspect.bzl%mezel_aspect' '--output_groups=bsp_info,bsp_info_deps'
 ```
 
+### Note for using `nvim-metals`
+The default `find_root_dir` function in the `nvim-metals` plugin does not work when files do not occur in the same workspace (goto definition of file in bazel cache).
+I suggest using the following configuration:
+```lua
+local metals_config = require("metals").bare_config()
+metals_config.find_root_dir = function ()
+  return vim.fn.getcwd()
+end
+```
+Courtesy of [this post](https://github.com/scalameta/nvim-metals/issues/671#issuecomment-2194575956).
+
 ### Metals configuration (optional)
 For larger projects, some operations can take longer than Metals (by default) will wait for a response before timing out.
 
