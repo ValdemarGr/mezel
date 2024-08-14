@@ -150,7 +150,7 @@ echo "bazel-$(basename $PWD)" >> .bazelignore
 ### Help something isn't working!
 You can try building the aspect yourself. This will emit information about what the mezel aspect finds in your build.
 ```bash
-bazel build '//...' --aspects '//aspects:aspect.bzl%mezel_aspect' '--output_groups=bsp_info,bsp_info_deps'
+bazel build '//...' --aspects '@mezel//aspects:aspect.bzl%mezel_aspect' '--output_groups=bsp_info,bsp_info_deps'
 ```
 
 ### Note for using `nvim-metals`
