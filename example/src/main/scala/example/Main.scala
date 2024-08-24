@@ -3,8 +3,10 @@ package example
 import cats.effect._
 import hxl._
 
-object Main extends App {
+object Main extends IOApp.Simple {
   Hxl
+
+  def run = IO.unit
 
   val a = {
     val b = 2

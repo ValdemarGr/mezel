@@ -28,6 +28,35 @@ toolchain(
     toolchain = "toolchain-scala_toolchain",
     toolchain_type = "@io_bazel_rules_scala//scala:toolchain_type",
     visibility = ["//visibility:public"],
+    target_settings = ["@io_bazel_rules_scala_config//:scala_version_2_13_12"]
+)
+
+scala_toolchain(
+    name = "toolchain-scala_toolchain_3",
+    scalacopts = [
+                "-encoding",
+                "UTF-8",
+                "-feature",
+                "-unchecked",
+                "-deprecation",
+                "-language:existentials",
+                "-language:higherKinds",
+                "-language:implicitConversions",
+                "-Ytasty-reader"
+            ],
+    visibility = ["//visibility:public"],
+    dependency_tracking_method = "ast",
+    enable_diagnostics_report = True,
+    dependency_mode = "plus-one",
+    enable_semanticdb = True,
+)
+
+toolchain(
+    name = "toolchain_3",
+    toolchain = "toolchain-scala_toolchain_3",
+    toolchain_type = "@io_bazel_rules_scala//scala:toolchain_type",
+    visibility = ["//visibility:public"],
+    target_settings = ["@io_bazel_rules_scala_config//:scala_version_3_3_1"]
 )
 
 make_mezel_launcher(
