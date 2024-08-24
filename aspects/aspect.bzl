@@ -40,7 +40,7 @@ def _mezel_aspect(target, ctx):
 
   sdb = target[SemanticdbInfo]
 
-  semanticdb_plugin = sdb.plugin_jar
+  semanticdb_plugin = sdb.plugin_jar if type(sdb.plugin_jar) == "string" else sdb.plugin_jar.path
   semanticdb_target_root = sdb.target_root
 
   dep_providers = tc.dep_providers

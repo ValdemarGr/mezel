@@ -29,11 +29,11 @@ rules_proto_dependencies()
 rules_proto_toolchains()
 
 # scala
-rules_scala_version = "f9381414068466b9c74ff7681d204e1eb19c7f80"  # update this as needed
+rules_scala_version = "6c6ba4e31cb56c038fe9967efd222007d73fd5cf"  # update this as needed
 
 http_archive(
     name = "io_bazel_rules_scala",
-    sha256 = "63be9ff9e5788621cbf087f659f4c4e8d2a328e6d77353e455a09d923b653b56",
+    sha256 = "3aad1238ba84d53f1f9471452580835ff0f3e8b6f03567e9e17017e8cc8e3894",
     strip_prefix = "rules_scala-%s" % rules_scala_version,
     type = "zip",
     url = "https://github.com/bazelbuild/rules_scala/archive/%s.zip" % rules_scala_version,
