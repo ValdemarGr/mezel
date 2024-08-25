@@ -42,7 +42,7 @@ scala_toolchain(
                 "-language:existentials",
                 "-language:higherKinds",
                 "-language:implicitConversions",
-                "-Ytasty-reader"
+                "-Ykind-projector"
             ],
     visibility = ["//visibility:public"],
     dependency_tracking_method = "ast",

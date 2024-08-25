@@ -82,9 +82,12 @@ maven_install(
       "https://maven.google.com",
       "https://repo1.maven.org/maven2",
   ],
-  maven_install_json = "//:maven_install_3.json",
-  fetch_sources = False
+  maven_install_json = "//:maven3_install.json",
+  fetch_sources = True
 )
+load("@maven3//:defs.bzl", pinned_maven_install_3="pinned_maven_install")
+pinned_maven_install_3()
+
 maven_install(
   name = "maven",
   artifacts = [
@@ -98,9 +101,8 @@ maven_install(
   maven_install_json = "//:maven_install.json",
   fetch_sources = True
 )
-
-load("@maven//:defs.bzl", "pinned_maven_install")
-pinned_maven_install()
+load("@maven//:defs.bzl", pinned_maven_install_2="pinned_maven_install")
+pinned_maven_install_2()
 
 load("//rules:load_mezel.bzl", "load_mezel")
 load_mezel()
@@ -117,6 +119,11 @@ scala_library(
     name = "hxl",
     srcs = glob(["modules/core/src/main/scala/**/*.scala"]),
     visibility = ["//visibility:public"],
+    scalacopts = select_for_scala_version(
+      before_3_3 = [
+        "-Xsource:3"
+      ]
+    ),
     plugins = select_for_scala_version(
       before_3_3 = [
         "@maven//:org_typelevel_kind_projector_2_13_12",
