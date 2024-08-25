@@ -91,10 +91,10 @@ config_setting(
 ### Mezel setup
 Mezel needs an aspect to work, so add the following to your `WORKSPACE` file to get it into scope:
 ```starlark
-mezel_version = "94bc237b31308c204413c5448415c6fccd078a06"
+mezel_version = "826fa0346756ec408bd6de201d95d9a766886c32"
 http_archive(
     name = "mezel",
-    sha256 = "f8b591b5bcba102ae7ef11c53e32cba4ddcc03f573650ac574f08a76c04971cb",
+    sha256 = "4ebbcd49fd9f8cd3d90451425319334a408441953e5e7f5acb5c561eef2e281e",
     strip_prefix = "mezel-%s" % mezel_version,
     type = "zip",
     url = "https://github.com/valdemargr/mezel/archive/%s.zip" % mezel_version,
