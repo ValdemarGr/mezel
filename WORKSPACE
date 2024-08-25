@@ -42,7 +42,7 @@ http_archive(
 load("@io_bazel_rules_scala//:scala_config.bzl", "scala_config")
 
 scala_config(
-  scala_version="3.3.1",
+  scala_version="2.13.12",
   scala_versions=["2.13.12", "3.3.1"]
 )
 # scala_config("3.3.0")
