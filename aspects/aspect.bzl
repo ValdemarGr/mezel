@@ -8,15 +8,8 @@ BuildTargetInfo = provider(
   }
 )
 
-rule_kinds = [
-  "scala_library",
-  "scala_binary",
-  "scala_test",
-  "scala_junit_test"
-]
-
 def _mezel_aspect(target, ctx):
-  if not ctx.rule.kind in rule_kinds or (ctx.attr.non_root_projects_as_build_targets == "false" and target.label.workspace_root != ""):
+  if (ctx.attr.non_root_projects_as_build_targets == "false" and target.label.workspace_root != ""):
     return []
   print("mezel aspect for", target.label)
 
@@ -36,7 +29,7 @@ def _mezel_aspect(target, ctx):
   attr_opts = attrs.scalacopts if attrs.scalacopts else []
   opts = tc_opts + attr_opts
 
-  x = ctx.toolchains["@io_bazel_rules_scala//scala:toolchain_type"].scala_version
+  x = tc.scala_version
   compiler_version = x if x != None else SCALA_VERSION
 
   sdb = target[SemanticdbInfo]
@@ -176,6 +169,7 @@ mezel_aspect = aspect(
   implementation = _mezel_aspect,
   attr_aspects = ["deps"],
   required_aspect_providers = [[JavaInfo, SemanticdbInfo]],
+  required_providers = [JavaInfo, SemanticdbInfo],
   attrs = {
     "_jdk": attr.label(
         default = Label("@bazel_tools//tools/jdk:current_java_runtime"),
