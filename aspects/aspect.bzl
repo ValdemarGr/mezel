@@ -36,7 +36,8 @@ def _mezel_aspect(target, ctx):
   attr_opts = attrs.scalacopts if attrs.scalacopts else []
   opts = tc_opts + attr_opts
 
-  compiler_version = SCALA_VERSION
+  x = ctx.toolchains["@io_bazel_rules_scala//scala:toolchain_type"].scala_version
+  compiler_version = x if x != None else SCALA_VERSION
 
   sdb = target[SemanticdbInfo]
 
