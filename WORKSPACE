@@ -49,7 +49,7 @@ scala_config(
 
 load("@io_bazel_rules_scala//scala:scala.bzl", "scala_repositories")
 
-register_toolchains("//:toolchain")
+register_toolchains("//:toolchain_2")
 register_toolchains("//:toolchain_3")
 
 scala_repositories()
@@ -119,11 +119,6 @@ scala_library(
     name = "hxl",
     srcs = glob(["modules/core/src/main/scala/**/*.scala"]),
     visibility = ["//visibility:public"],
-    scalacopts = select_for_scala_version(
-      before_3_3 = [
-        "-Xsource:3"
-      ]
-    ),
     plugins = select_for_scala_version(
       before_3_3 = [
         "@maven//:org_typelevel_kind_projector_2_13_12",

@@ -3,7 +3,7 @@ load("//rules:make_mezel_launcher.bzl", "make_mezel_launcher")
 load("//aspects:aspect.bzl", "mezel_rule")
 
 scala_toolchain(
-    name = "toolchain-scala_toolchain",
+    name = "toolchain-scala_toolchain_2",
     scalacopts = [
                 "-encoding",
                 "UTF-8",
@@ -24,8 +24,8 @@ scala_toolchain(
 )
 
 toolchain(
-    name = "toolchain",
-    toolchain = "toolchain-scala_toolchain",
+    name = "toolchain_2",
+    toolchain = "toolchain-scala_toolchain_2",
     toolchain_type = "@io_bazel_rules_scala//scala:toolchain_type",
     visibility = ["//visibility:public"],
     target_settings = ["@io_bazel_rules_scala_config//:scala_version_2_13_12"]
