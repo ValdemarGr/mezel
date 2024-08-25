@@ -22,6 +22,7 @@
     lib = nixpkgs.lib;
     list = lib.lists;
     bazel-wrapper = pkgs.writeShellScriptBin "bazel" ''
+      unset TMPDIR TMP
       exec env --unset=USE_BAZEL_VERSION ${pkgs.bazelisk}/bin/bazelisk "$@"
     '';
     bazel-fhs = pkgs.buildFHSEnv {
