@@ -73,14 +73,13 @@
   in
   {
     devShells.${system}.default = pkgs.mkShell {
-      name = "mazel-dev";
+      name = "mezel-dev";
       nativeBuildInputs = [ 
         bazel-fhs 
         pkgs.jdk11
         pkgs.scalafmt
         pkgs.zsh
         pkgs.sbt
-        pkgs.graalvm-ce
         bazel-watcher
         fmtall
         gen-protobuf
