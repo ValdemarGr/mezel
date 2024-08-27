@@ -29,7 +29,7 @@ def _mezel_aspect(target, ctx):
   attr_opts = attrs.scalacopts if attrs.scalacopts else []
   opts = tc_opts + attr_opts
 
-  x = tc.scala_version
+  x = tc.scala_version if "scala_version" in dir(tc) else None
   compiler_version = x if x != None else SCALA_VERSION
 
   sdb = target[SemanticdbInfo]
@@ -56,7 +56,11 @@ def _mezel_aspect(target, ctx):
     x[BuildTargetInfo].output
     for x in attrs.deps if BuildTargetInfo in x 
   ]
-  direct_dep_labels = [x.label for x in dep_outputs]
+  direct_dep_labels_unfixed = [x.label for x in dep_outputs] + [x.label for x in attrs.deps]
+  def normalize_label(l):
+    x = str(l)
+    return x if x.startswith("@") else "@" + x
+  direct_dep_labels = [normalize_label(x) for x in direct_dep_labels_unfixed]
   print("direct dep labels", direct_dep_labels)
 
   transitive_labels = depset([target.label], transitive = [x.transitive_labels for x in dep_outputs])

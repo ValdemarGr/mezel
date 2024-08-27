@@ -80,7 +80,13 @@ final case class DependencyGraph(
 
   val roots = children.keySet -- nonRoots
 
-  val leaves = children.toList.collect { case (k, Nil) => k }.toSet
+  val leaves: Set[String] = children.toList.collect{ 
+    // if all the children of node k do not occur in the tree
+    // then k is a leaf
+    // we can do this because we know that all targetable labels
+    // occur in the tree children
+    case (k, vs) if vs.forall(v => !children.contains(v)) => k
+  }.toSet
 
   val parents =
     children.toList
@@ -472,6 +478,7 @@ class BspServerOps(
       diagnosticsFiles <- diagnosticsFiles
       xs <- readId
       dg <- dependencyGraph
+      _ <- verbose.debug(trace.logger.logInfo(s"dg ${dg}"))
       _ <- verbose.debug(trace.logger.logInfo(s"ancestor map ${dg.ancestors}"))
       _ <- {
         def diagnosticsProcess(diagnosticsProtoFile: Path): Stream[IO, Unit] = {

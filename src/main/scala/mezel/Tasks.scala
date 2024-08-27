@@ -85,8 +85,10 @@ class Tasks(
             val s = pfs.find(_.label.endsWith("bsp_sources.json")).get
             val ds = pfs.find(_.label.endsWith("bsp_dependency_sources.json")).get
             val bt = pfs.find(_.label.endsWith("build_target.json")).get
+            val label = ext.targetMap(act.targetId)
+            val normalized = if (label.startsWith("@")) label else s"@${label}"
             BuildTargetFiles(
-              ext.targetMap(act.targetId),
+              normalized,
               execRoot / ext.buildPath(so),
               execRoot / ext.buildPath(s),
               execRoot / ext.buildPath(ds),
