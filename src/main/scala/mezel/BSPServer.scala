@@ -231,7 +231,8 @@ class BspServerOps(
     trace: Trace,
     cache: Cache,
     cacheKeys: BspCacheKeys,
-    ct: CancellableTask
+    ct: CancellableTask,
+    verbose: Verbose
 )(implicit R: Raise[IO, BspResponseError]) {
   import _root_.io.circe.syntax.*
 
@@ -322,7 +323,9 @@ class BspServerOps(
 
   def diagnosticsFiles =
     cached("diagnosticsFiles")(_.diagnosticsFiles) {
-      tasks.flatMap(_.diagnosticsFiles.map(_.toMap))
+      tasks
+        .flatMap(_.diagnosticsFiles.map(_.toMap))
+        .flatTap(m => verbose.trace(trace.logger.logInfo(s"diagnostics files are $m")))
     }
 
   def cacheFolder: IO[Path] =
@@ -460,16 +463,17 @@ class BspServerOps(
   val compilationTaskKey = "compile"
 
   def compile(targets: List[SafeUri]): IO[Option[Json]] = {
-    val doCompile: Stream[IO, Unit] = for {
-      wsr <- Stream.eval(workspaceRoot)
-      t <- Stream.eval(tasks)
-      prevDiagnostics <- Stream.eval(prevDiagnostics)
-      cacheDir <- Stream.eval(cacheFolder)
-      execRoot <- Stream.eval(derivedExecRoot)
-      diagnosticsFiles <- Stream.eval(diagnosticsFiles)
-      xs <- Stream.eval(readId)
-      dg <- Stream.eval(dependencyGraph)
-      _ <- Stream.eval {
+    val doCompile: IO[Unit] = for {
+      wsr <- workspaceRoot
+      t <- tasks
+      prevDiagnostics <- prevDiagnostics
+      cacheDir <- cacheFolder
+      execRoot <- derivedExecRoot
+      diagnosticsFiles <- diagnosticsFiles
+      xs <- readId
+      dg <- dependencyGraph
+      _ <- verbose.debug(trace.logger.logInfo(s"ancestor map ${dg.ancestors}"))
+      _ <- {
         def diagnosticsProcess(diagnosticsProtoFile: Path): Stream[IO, Unit] = {
           Stream.eval(readScalacOptions).flatMap { scalacOptions =>
             Stream.eval(readSources).flatMap { sources =>
@@ -504,21 +508,26 @@ class BspServerOps(
                       } yield (label, comp.success)
                     }
                     .evalFilter {
-                      case (label, true) => IO.pure(true)
+                      case (label, true) => trace.logger.logInfo(s"$label completed") *> IO.pure(true)
                       case (label, false) =>
-                        eliminatedRef.get.flatMap { eliminated =>
-                          // we have not been eliminated, but we have failed
-                          // eliminate all our ancestors, but keep this target
-                          if (!eliminated.contains(label)) {
-                            val anc = dg.ancestors.get(label).getOrElse(Set.empty)
-                            eliminatedRef.update(_ ++ anc).as(true)
+                        verbose.debug(trace.logger.logInfo(s"$label failed")) *>
+                          eliminatedRef.get.flatMap { eliminated =>
+                            // we have not been eliminated, but we have failed
+                            // eliminate all our ancestors, but keep this target
+                            if (!eliminated.contains(label)) {
+                              val anc = dg.ancestors.get(label).getOrElse(Set.empty)
+                              verbose.debug {
+                                trace.logger.logInfo(s"$label is not eliminated") *>
+                                  trace.logger.logInfo(s"$label: eliminating all ancestors ${anc}")
+                              } *> eliminatedRef.update(_ ++ anc).as(true)
+                            }
+                            // we have been eliminated, a child of ours has failed
+                            // clear all previous diagnostics for this target
+                            else {
+                              verbose.debug(trace.logger.logInfo(s"$label is eliminated, skipping")) *>
+                                diagnosticEffect(buildIdent(label), Nil).as(false)
+                            }
                           }
-                          // we have been eliminated, a child of ours has failed
-                          // clear all previous diagnostics for this target
-                          else {
-                            diagnosticEffect(buildIdent(label), Nil).as(false)
-                          }
-                        }
                     }
                 }
 
@@ -591,7 +600,7 @@ class BspServerOps(
         _ <- trace.logger.logInfo(s"beginning compilation task with id $id")
         prg = {
           trace.logger.logInfo(s"running compilation task with id $id") *>
-            doCompile.compile.drain <*
+            doCompile <*
             trace.logger.logInfo(s"finished compiling with id $id")
         }.onCancel(trace.logger.logInfo(s"cancelled compilation with id $id"))
         _ <- ct.start(trace, compilationTaskKey, prg)

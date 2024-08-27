@@ -3,7 +3,7 @@ enablePlugins(GraalVMNativeImagePlugin)
 ThisBuild / scalaVersion := "3.3.1"
 ThisBuild / organization := "io.github.valdemargr"
 
-ThisBuild / tlBaseVersion := "0.1"
+ThisBuild / tlBaseVersion := "0.2"
 ThisBuild / tlUntaggedAreSnapshots := false
 ThisBuild / tlSonatypeUseLegacyHost := true
 ThisBuild / tlFatalWarnings := false
@@ -40,7 +40,7 @@ lazy val sharedSettings = Seq(
         "-Wconf:cat=unused-nowarn:s",
         "-Ywarn-unused:-nowarn"
       )
-    } else Seq.empty // Seq("-explain")
+    } else Seq.empty // Seq("-no-indent")
   },
   libraryDependencies ++= Seq(
     "org.typelevel" %% "cats-effect" % "3.5.2",

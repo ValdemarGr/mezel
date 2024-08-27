@@ -33,7 +33,14 @@ object Main
     )
     .orEmpty
 
-  def main: Opts[IO[ExitCode]] = (fsFlag, buildArgsFlag, aqueryArgsFlag).mapN { case (fs, buildArgs, aqueryArgs) =>
+  val verbose: Opts[Verbosity] = Opts.flags(
+    "verbose",
+    "Enable verbose logging and tracing.",
+    short="v"
+  ).map(Verbosity.fromInt).withDefault(Verbosity.Normal)
+
+  def main: Opts[IO[ExitCode]] = (fsFlag, buildArgsFlag, aqueryArgsFlag, verbose)
+    .mapN { case (fs, buildArgs, aqueryArgs, verbose) =>
     val (stdin, stdout) = if (fs) {
       (
         Files[IO].tail(Path("/tmp/from-metals")),
@@ -47,7 +54,7 @@ object Main
     }
 
     BSPServerDeps.make.use{ deps =>
-      val bsl = new BSPServerLifecycle(buildArgs, aqueryArgs, deps)
+      val bsl = new BSPServerLifecycle(buildArgs, aqueryArgs, deps, verbose)
       bsl.start(stdin, stdout).as(ExitCode.Success)
     }
   }

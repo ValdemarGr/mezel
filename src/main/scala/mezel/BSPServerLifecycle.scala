@@ -16,8 +16,11 @@ import java.nio.charset.StandardCharsets
 class BSPServerLifecycle(
     buildArgs: List[String],
     aqueryArgs: List[String],
-    deps: BSPServerDeps
+    deps: BSPServerDeps,
+    verbosity: Verbosity
 ) {
+  def verbose: Verbose = Verbose.make(verbosity)
+
   def logger(originId: Option[String]): Logger =
     Logger.make(None, originId)(x => deps.output.send(x.asJson).void)
 
@@ -35,7 +38,8 @@ class BSPServerLifecycle(
       trace,
       deps.cache,
       deps.cacheKeys,
-      deps.ct
+      deps.ct,
+      verbose
     )
 
   def runRequest(trace: Trace, id: Option[RpcId])(res: IO[Either[BspResponseError, Option[Json]]]): IO[Option[Json]] = {

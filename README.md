@@ -105,13 +105,6 @@ load_mezel()
 ```
 The Mezel BSP program will expect the Mezel aspect to be at the label `@mezel//aspects:aspect.bzl`, so make sure to name the `http_achive` `mezel` like in the example.
 
-Add the following to your `BUILD.bazel` (any location is fine) to create a bazel target for the Mezel binary:
-```starlark
-#./BUILD.bazel
-load("@mezel//rules:make_mezel_launcher.bzl", "make_mezel_launcher")
-make_mezel_launcher(name = "mk_mezel")
-```
-
 Now we have a Mezel binary to run.
 Create a config for Metals at `.bsp/mezel.json`:
 ```json
@@ -138,6 +131,15 @@ A configuration example that uses a custom toolchain and set of configuration op
   "--build-arg", "--define=no_fatal_warnings=true",
   "--aquery-arg", "--extra_toolchains=//toolchain:lsp",
   "--aquery-arg", "--define=no_fatal_warnings=true"
+],"bspVersion":"2.1.0","languages":["scala"],"name":"Mezel","version":"1.0.0"}
+```
+
+If you have a custom rcfile, you can also ask bazel to include that:
+```json
+{"argv":[
+  "bazel", "run", "@mezel//rules:mezel_jar", "--",
+  "--build-arg", "--bazelrc=.bazelrc.bsp",
+  "--aquery-arg", "--bazelrc=.bazelrc.bsp"
 ],"bspVersion":"2.1.0","languages":["scala"],"name":"Mezel","version":"1.0.0"}
 ```
 
