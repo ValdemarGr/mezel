@@ -155,6 +155,11 @@ You can try building the aspect yourself. This will emit information about what 
 bazel build '//...' --aspects '@mezel//aspects:aspect.bzl%mezel_aspect' '--output_groups=bsp_info,bsp_info_deps'
 ```
 
+Mezel can also emit more detailed execution information by providing up to 3 `-v` flags:
+```bash
+bazel run "@mezel//rules:mezel_jar" -- -vvv
+```
+
 ### Note for using `nvim-metals`
 The default `find_root_dir` function in the `nvim-metals` plugin does not work when files do not occur in the same workspace (goto definition of file in bazel cache).
 I suggest using the following configuration:

@@ -56,11 +56,7 @@ def _mezel_aspect(target, ctx):
     x[BuildTargetInfo].output
     for x in attrs.deps if BuildTargetInfo in x 
   ]
-  direct_dep_labels_unfixed = [x.label for x in dep_outputs] + [x.label for x in attrs.deps]
-  def normalize_label(l):
-    x = str(l)
-    return x if x.startswith("@") else "@" + x
-  direct_dep_labels = [normalize_label(x) for x in direct_dep_labels_unfixed]
+  direct_dep_labels = [x.label for x in dep_outputs]
   print("direct dep labels", direct_dep_labels)
 
   transitive_labels = depset([target.label], transitive = [x.transitive_labels for x in dep_outputs])
