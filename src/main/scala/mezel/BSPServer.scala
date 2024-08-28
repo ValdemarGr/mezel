@@ -26,9 +26,9 @@ enum BspResponseError(val code: Int, val message: String, val data: Option[Json]
   def responseError: ResponseError = ResponseError(code, message, data)
 
 final case class BuildTargetCache(
-    buildTargets: List[(String, BuildTargetFiles)]
+    buildTargets: List[(Label, BuildTargetFiles)]
 ) {
-  def read[A: Decoder](f: BuildTargetFiles => Path): Stream[IO, (String, A)] =
+  def read[A: Decoder](f: BuildTargetFiles => Path): Stream[IO, (Label, A)] =
     Stream.emits(buildTargets).parEvalMapUnordered(16) { case (label, bt) =>
       Files[IO].readAll(f(bt)).through(fs2.text.utf8.decode).compile.string.flatMap { str =>
         IO.fromEither(_root_.io.circe.parser.decode[A](str)) tupleLeft label
@@ -49,7 +49,7 @@ final case class BuildTargetCache(
 }
 
 final case class BuildTargetFiles(
-    label: String,
+    label: Label,
     scalacOptions: Path,
     sources: Path,
     dependencySources: Path,
@@ -74,13 +74,13 @@ final case class ActionQueryResultExtensions(
 }
 
 final case class DependencyGraph(
-    children: Map[String, List[String]]
+    children: Map[Label, List[Label]]
 ) {
   val nonRoots = children.values.flatten.toSet
 
   val roots = children.keySet -- nonRoots
 
-  val leaves: Set[String] = children.toList.collect{ 
+  val leaves: Set[Label] = children.toList.collect{ 
     // if all the children of node k do not occur in the tree
     // then k is a leaf
     // we can do this because we know that all targetable labels
@@ -93,16 +93,16 @@ final case class DependencyGraph(
       .flatMap { case (p, cs) => cs.map(c => c -> p) }
       .groupMap { case (c, _) => c } { case (_, p) => p } ++ roots.map(_ -> Nil).toMap
 
-  val ancestors: Map[String, Set[String]] = {
-    def go(label: String): State[Map[String, Set[String]], Set[String]] =
-      State.get[Map[String, Set[String]]].flatMap { m =>
+  val ancestors: Map[Label, Set[Label]] = {
+    def go(label: Label): State[Map[Label, Set[Label]], Set[Label]] =
+      State.get[Map[Label, Set[Label]]].flatMap { m =>
         m.get(label) match {
           case Some(x) => State.pure(x)
           case None =>
             val ps = parents(label)
             ps.foldMapA(go).flatMap { transitives =>
               val comb = transitives ++ ps
-              State.modify[Map[String, Set[String]]](_ + (label -> comb)).as(comb + label)
+              State.modify[Map[Label, Set[Label]]](_ + (label -> comb)).as(comb + label)
             }
         }
       }
@@ -127,12 +127,8 @@ def pathToUri(p: Path): SafeUri =
 def pathFullToUri(root: SafeUri, p: Path): SafeUri =
   SafeUri((uriToPath(root) / p).toNioPath.toUri().toString())
 
-def buildIdent(label: String): BuildTargetIdentifier = {
-  // canonical labels should start with @
-  // such that //blah becomes @//blah
-  val fixedLabel = if label.startsWith("@") then label else s"@$label"
-  BuildTargetIdentifier(SafeUri(fixedLabel))
-}
+def buildIdent(label: Label): BuildTargetIdentifier = 
+  BuildTargetIdentifier(SafeUri(label.value))
 
 def uriToPath(suri: SafeUri): Path = Path.fromNioPath(Paths.get(new URI(suri.value)))
 
@@ -214,7 +210,7 @@ def convertDiagnostic(
 final case class BspCacheKeys(
     derivedEnv: CacheKey[Map[String, String]],
     buildTargetCache: CacheKey[BuildTargetCache],
-    diagnosticsFiles: CacheKey[Map[String, Path]],
+    diagnosticsFiles: CacheKey[Map[Label, Path]],
     dependencyGraph: CacheKey[DependencyGraph]
 )
 
@@ -222,7 +218,7 @@ object BspCacheKeys {
   def make: IO[BspCacheKeys] = (
     CacheKey.make[Map[String, String]],
     CacheKey.make[BuildTargetCache],
-    CacheKey.make[Map[String, Path]],
+    CacheKey.make[Map[Label, Path]],
     CacheKey.make[DependencyGraph]
   ).mapN(BspCacheKeys.apply)
 }
@@ -247,7 +243,7 @@ class BspServerOps(
 
   // for now we just compile
   // TODO, we can stream the results out into json
-  def readBuildTargetCache[A](f: BuildTargetCache => Stream[IO, (String, A)]): IO[List[(String, A)]] = {
+  def readBuildTargetCache[A](f: BuildTargetCache => Stream[IO, (Label, A)]): IO[List[(Label, A)]] = {
     val fa = for {
       curr <- Stream.eval(state.get)
       btc <- Stream.eval(buildTargetCache)
@@ -501,7 +497,7 @@ class BspServerOps(
                 }
 
               val labelStream =
-                Stream.eval(IO.ref[Set[String]](Set.empty)).flatMap { eliminatedRef =>
+                Stream.eval(IO.ref[Set[Label]](Set.empty)).flatMap { eliminatedRef =>
                   trace
                     .traceStream("parse bazel BEP") {
                       parseBEP(diagnosticsProtoFile)
@@ -511,11 +507,11 @@ class BspServerOps(
                         comp <- x.payload.completed
                         id <- x.id
                         targetCompletedId <- id.id.targetCompleted
-                        label <- Some(targetCompletedId.label).filter(bspLabels.contains)
+                        label <- Some(Label.parse(targetCompletedId.label)).filter(bspLabels.contains)
                       } yield (label, comp.success)
                     }
                     .evalFilter {
-                      case (label, true) => trace.logger.logInfo(s"$label completed") *> IO.pure(true)
+                      case (label, true) => verbose.debug(trace.logger.logInfo(s"$label completed")) *> IO.pure(true)
                       case (label, false) =>
                         verbose.debug(trace.logger.logInfo(s"$label failed")) *>
                           eliminatedRef.get.flatMap { eliminated =>
@@ -737,7 +733,7 @@ class BspServerOps(
 
           BuildTarget(
             id = buildIdent(label),
-            displayName = Some(label),
+            displayName = Some(label.value),
             baseDirectory = Some(dir),
             tags = List("library"),
             languageIds = List("scala"),

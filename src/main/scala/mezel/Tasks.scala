@@ -88,7 +88,7 @@ class Tasks(
             val label = ext.targetMap(act.targetId)
             // val normalized = if (label.startsWith("@")) label else s"@${label}"
             BuildTargetFiles(
-              label,
+              Label.parse(label),
               execRoot / ext.buildPath(so),
               execRoot / ext.buildPath(s),
               execRoot / ext.buildPath(ds),
@@ -98,13 +98,13 @@ class Tasks(
         }
   }
 
-  def diagnosticsFiles: IO[Seq[(String, Path)]] = trace.trace("diagnosticsFiles") {
+  def diagnosticsFiles: IO[Seq[(Label, Path)]] = trace.trace("diagnosticsFiles") {
     import dsl._
 
     api.aquery(union(mnemonic("Scalac")("..."))(mnemonic("FileWrite")("..."))).map { aq =>
       val ext = ActionQueryResultExtensions(aq)
       aq.actions.mapFilter { a =>
-        val label = ext.targetMap(a.targetId)
+        val label = Label.parse(ext.targetMap(a.targetId))
         val outputs = a.primaryOutputId :: a.outputIds.toList
         val res = outputs
           .collectFirstSome { id =>

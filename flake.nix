@@ -76,9 +76,8 @@
       name = "mezel-dev";
       nativeBuildInputs = [ 
         bazel-fhs 
-        pkgs.jdk11
+        pkgs.jdk21
         pkgs.scalafmt
-        pkgs.zsh
         pkgs.sbt
         bazel-watcher
         fmtall

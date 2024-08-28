@@ -27,7 +27,7 @@ object AspectTypes {
       javaHome: String,
       scalaCompilerClasspath: List[String],
       compilerVersion: ScalaVersion,
-      deps: List[String],
+      deps: List[Label],
       directory: String,
       workspaceRoot: Option[String]
   ) derives Decoder
