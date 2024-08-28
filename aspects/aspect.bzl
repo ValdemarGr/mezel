@@ -9,9 +9,9 @@ BuildTargetInfo = provider(
 )
 
 def _mezel_aspect(target, ctx):
-  if (ctx.attr.non_root_projects_as_build_targets == "false" and target.label.workspace_root != ""):
+  if (ctx.attr.non_root_projects_as_build_targets == "false" and target.label.workspace_root != "") or not (SemanticdbInfo in target) or not (JavaInfo in target):
     return []
-  print("mezel aspect for", target.label)
+  print("mezel aspect for ", target.label)
 
   attrs = ctx.rule.attr
 
@@ -173,7 +173,6 @@ mezel_aspect = aspect(
   implementation = _mezel_aspect,
   attr_aspects = ["deps"],
   required_aspect_providers = [[JavaInfo, SemanticdbInfo]],
-  required_providers = [JavaInfo, SemanticdbInfo],
   attrs = {
     "_jdk": attr.label(
         default = Label("@bazel_tools//tools/jdk:current_java_runtime"),
