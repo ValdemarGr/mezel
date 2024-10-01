@@ -20,10 +20,11 @@ import _root_.io.bazel.rules_scala.diagnostics.diagnostics
 import cats.effect.std.Supervisor
 import cats.effect.std.UUIDGen
 
-enum BspResponseError(val code: Int, val message: String, val data: Option[Json] = None):
+enum BspResponseError(val code: Int, val message: String, val data: Option[Json] = None) {
   case NotInitialized extends BspResponseError(-32002, "Server not initialized")
 
   def responseError: ResponseError = ResponseError(code, message, data)
+}
 
 final case class BuildTargetCache(
     buildTargets: List[(Label, BuildTargetFiles)]
@@ -80,7 +81,7 @@ final case class DependencyGraph(
 
   val roots = children.keySet -- nonRoots
 
-  val leaves: Set[Label] = children.toList.collect{ 
+  val leaves: Set[Label] = children.toList.collect {
     // if all the children of node k do not occur in the tree
     // then k is a leaf
     // we can do this because we know that all targetable labels
@@ -127,7 +128,7 @@ def pathToUri(p: Path): SafeUri =
 def pathFullToUri(root: SafeUri, p: Path): SafeUri =
   SafeUri((uriToPath(root) / p).toNioPath.toUri().toString())
 
-def buildIdent(label: Label): BuildTargetIdentifier = 
+def buildIdent(label: Label): BuildTargetIdentifier =
   BuildTargetIdentifier(SafeUri(label.value))
 
 def uriToPath(suri: SafeUri): Path = Path.fromNioPath(Paths.get(new URI(suri.value)))
@@ -363,7 +364,7 @@ class BspServerOps(
       }.compile
         .drain
     }
-    // }
+  // }
 
   def mkTasks(rootUri: SafeUri) = {
     outputBaseFromSource.map { ob =>
@@ -381,7 +382,7 @@ class BspServerOps(
 
     state.get
       .flatMap { s =>
-        if s.workspaceRoot.isDefined then IO.raiseError(new Exception("already initialized"))
+        if (s.workspaceRoot.isDefined) IO.raiseError(new Exception("already initialized"))
         else makeEnv.flatMap(env => state.update(_.copy(initReq = Some(msg), sourceEnv = Some(env))))
       } >> {
       trace
@@ -631,6 +632,8 @@ class BspServerOps(
           src.sources
             .traverse { x =>
               val p = execRoot / x.path
+              val t = if (x.isDirectory) SourceItemKind.Directory else SourceItemKind.File
+              val generated = !x.isSource
               Files[IO]
                 .exists(p)
                 .flatMap {
@@ -638,9 +641,9 @@ class BspServerOps(
                   case true  => IO(Path.fromNioPath(p.toNioPath.toRealPath()))
                 }
                 .flatMap(y => IO(pathToUri(y)))
-                .map(uri => SourceItem(uri, SourceItemKind.File, !x.isSource))
+                .map(uri => SourceItem(uri, t, generated))
             }
-            .map ( xs => SourcesItem( buildIdent(label), xs, List(wsr)) )
+            .map(xs => SourcesItem(buildIdent(label), xs, List(wsr)))
         }
         .map(ss => Some(SourcesResult(SourcesItem(BuildTargetIdentifier(SafeUri("workspace")), Nil, List(wsr)) :: ss).asJson))
     } yield out

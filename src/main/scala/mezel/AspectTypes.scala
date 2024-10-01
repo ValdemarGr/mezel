@@ -17,7 +17,8 @@ object AspectTypes {
 
   final case class Source(
     isSource: Boolean,
-    path: String
+    path: String,
+    isDirectory: Boolean
   ) derives Decoder
   final case class Sources(
       sources: List[Source]
