@@ -630,22 +630,17 @@ class BspServerOps(
         .traverse { case (label, src) =>
           src.sources
             .traverse { x =>
-              val p = execRoot / x
+              val p = execRoot / x.path
               Files[IO]
                 .exists(p)
                 .flatMap {
                   case false => trace.logger.logWarn(s"source file does not exist yet, maybe it is generated? $p").as(p)
-                  case true  => IO(Path.fromNioPath((execRoot / x).toNioPath.toRealPath()))
+                  case true  => IO(Path.fromNioPath(p.toNioPath.toRealPath()))
                 }
                 .flatMap(y => IO(pathToUri(y)))
+                .map(uri => SourceItem(uri, SourceItemKind.File, !x.isSource))
             }
-            .map { xs =>
-              SourcesItem(
-                buildIdent(label),
-                xs.map(SourceItem(_, SourceItemKind.File, false)),
-                List(wsr)
-              )
-            }
+            .map ( xs => SourcesItem( buildIdent(label), xs, List(wsr)) )
         }
         .map(ss => Some(SourcesResult(SourcesItem(BuildTargetIdentifier(SafeUri("workspace")), Nil, List(wsr)) :: ss).asJson))
     } yield out

@@ -105,7 +105,10 @@ def _mezel_aspect(target, ctx):
 
   sources_file = ctx.actions.declare_file("{}_bsp_sources.json".format(target.label.name))
   sources_content = struct(
-    sources = [f.path for src in attrs.srcs for f in src.files.to_list() if f.is_source]
+    sources = [{
+      path: f.path,
+      isSource: f.is_source
+    } for src in attrs.srcs for f in src.files.to_list()]
   )
   ctx.actions.write(sources_file, json.encode(sources_content))
 

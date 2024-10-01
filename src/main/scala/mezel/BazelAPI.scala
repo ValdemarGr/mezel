@@ -8,9 +8,7 @@ import fs2.*
 import cats.effect.{Trace => _, *}
 import fs2.io.file.*
 import cats.*
-import fs2.io.process.*
 import scalapb._
-import com.zaxxer.nuprocess.internal.LibC
 import cats.effect.kernel.Resource.ExitCase
 
 class BazelAPI(

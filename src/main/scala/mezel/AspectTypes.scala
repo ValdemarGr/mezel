@@ -15,8 +15,12 @@ object AspectTypes {
       workspaceRoot: Option[String]
   ) derives Decoder
 
+  final case class Source(
+    isSource: Boolean,
+    path: String
+  ) derives Decoder
   final case class Sources(
-      sources: List[String]
+      sources: List[Source]
   ) derives Decoder
 
   final case class DependencySources(

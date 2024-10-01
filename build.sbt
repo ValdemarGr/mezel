@@ -73,6 +73,7 @@ lazy val protos = project
       "com.thesamet.scalapb" %% "scalapb-runtime" % scalapb.compiler.Version.scalapbVersion % "protobuf"
     )
   )
+  .disablePlugins(TypelevelSettingsPlugin)
 
 lazy val root = project
   .in(file("."))
