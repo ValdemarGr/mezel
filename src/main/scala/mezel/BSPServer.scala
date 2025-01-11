@@ -147,64 +147,71 @@ def convertDiagnostic(
   // so we just ignore and log it
   // https://github.com/ValdemarGr/mezel/issues/21
   tds.diagnostics.groupBy(_.path).toList.flatTraverse { case (p, fds) =>
-    val ds = fds.flatMap(_.diagnostics).toList.map { d =>
-      val rng = d.range.get
-      val start = rng.start.get
-      val e = rng.end.get
-      Diagnostic(
-        range = Range(
-          Position(start.line, start.character),
-          Position(e.line, e.character)
-        ),
-        severity = d.severity match {
-          case diagnostics.Severity.ERROR       => Some(DiagnosticSeverity.Error)
-          case diagnostics.Severity.WARNING     => Some(DiagnosticSeverity.Warning)
-          case diagnostics.Severity.INFORMATION => Some(DiagnosticSeverity.Information)
-          case diagnostics.Severity.HINT        => Some(DiagnosticSeverity.Hint)
-          case _                                => None
-        },
-        code = Some(Code(d.code.toInt)),
-        codeDestription = None,
-        source = None,
-        message = d.message,
-        tags = None,
-        relatedInformation = Some {
-          d.relatedInformation.toList.map { ri =>
-            val rng = ri.location.get.range.get
-            val start = rng.start.get
-            val e = rng.end.get
-            DiagnosticRelatedInformation(
-              location = Location(
-                uri = SafeUri(ri.location.get.path),
-                range = Range(
-                  Position(start.line, start.character),
-                  Position(e.line, e.character)
-                )
-              ),
-              message = ri.message
-            )
-          }
-        },
-        None,
-        None
-      )
-    }
-
-    val fixedTextDocumentRef = p.replace("workspace-root://", "")
-    val pdp = PublishDiagnosticsParams(
-      textDocument = TextDocumentIdentifier(pathFullToUri(root, Path(fixedTextDocumentRef))),
-      buildTarget = target,
-      originId = None,
-      diagnostics = ds,
-      reset = true
-    )
-
-    import _root_.io.circe.syntax._
-    if (p.contains("no file")) {
+    if (p == "workspace-root://virtual-file") {
       lg.logWarn(
-        s"path $p contains \"no file\", which the Scala compiler can do sometimes. Ignoring the diagnostic, here is a dump of the output: ${pdp.asJson.noSpaces}"
+        "skipping virtual file"
       ).as(Nil)
-    } else IO.pure(List(pdp))
+    } else {
+
+      val ds = fds.flatMap(_.diagnostics).toList.map { d =>
+        val rng = d.range.get
+        val start = rng.start.get
+        val e = rng.end.get
+        Diagnostic(
+          range = Range(
+            Position(start.line, start.character),
+            Position(e.line, e.character)
+          ),
+          severity = d.severity match {
+            case diagnostics.Severity.ERROR       => Some(DiagnosticSeverity.Error)
+            case diagnostics.Severity.WARNING     => Some(DiagnosticSeverity.Warning)
+            case diagnostics.Severity.INFORMATION => Some(DiagnosticSeverity.Information)
+            case diagnostics.Severity.HINT        => Some(DiagnosticSeverity.Hint)
+            case _                                => None
+          },
+          code = Some(Code(d.code.toInt)),
+          codeDestription = None,
+          source = None,
+          message = d.message,
+          tags = None,
+          relatedInformation = Some {
+            d.relatedInformation.toList.map { ri =>
+              val rng = ri.location.get.range.get
+              val start = rng.start.get
+              val e = rng.end.get
+              DiagnosticRelatedInformation(
+                location = Location(
+                  uri = SafeUri(ri.location.get.path),
+                  range = Range(
+                    Position(start.line, start.character),
+                    Position(e.line, e.character)
+                  )
+                ),
+                message = ri.message
+              )
+            }
+          },
+          None,
+          None
+        )
+      }
+
+      val fixedTextDocumentRef = p.replace("workspace-root://", "")
+      val pdp = PublishDiagnosticsParams(
+        textDocument = TextDocumentIdentifier(pathFullToUri(root, Path(fixedTextDocumentRef))),
+        buildTarget = target,
+        originId = None,
+        diagnostics = ds,
+        reset = true
+      )
+
+      import _root_.io.circe.syntax._
+      if (p.contains("no file")) {
+        lg.logWarn(
+          s"path $p contains \"no file\", which the Scala compiler can do sometimes. Ignoring the diagnostic, here is a dump of the output: ${pdp.asJson.noSpaces}"
+        ).as(Nil)
+      } else IO.pure(List(pdp))
+    }
   }
 }
 
