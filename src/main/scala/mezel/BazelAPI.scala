@@ -27,30 +27,12 @@ class BazelAPI(
 
   def pipe: Pipe[IO, Byte, String] = _.through(fs2.text.utf8.decode).through(fs2.text.lines)
 
-  def run(b: Builder): Resource[IO, CatsProcess[IO]] =
-    trace.traceResource(s"bazel command ${(b.cmd :: b.args).map(x => s"'$x'").mkString(" ")}") {
-      val p = CatsProcess.spawnFull[IO](b.cmd :: b.args, b.cwd)
+  def run(b: Builder): Stream[IO, NuProcessAPI[IO]] =
+    trace.traceStream(s"bazel command ${(b.cmd :: b.args).map(x => s"'$x'").mkString(" ")}") {
+      val p = NuProcessAPI.spawn(b.cmd :: b.args, b.cwd)
 
-      val p2 = Resource
-        .make(p.allocated) { case (proc, release) =>
-          val to = 10.seconds
-          trace.trace("Shutting down process") {
-            IO.race(release, IO.sleep(to)).flatMap {
-              case Left(_) => IO.unit
-              case Right(_) =>
-                val to2 = 2.seconds
-                trace.logger.logWarn(s"Process did not terminate within ${to.toSeconds}s, killing it") *>
-                  IO.race(proc.kill.start.map(_.joinWithNever), IO.sleep(to2)).flatMap {
-                    case Right(_) => trace.logger.logWarn(s"Process did not terminate within ${to2}s after kill, giving up")
-                    case Left(_)  => trace.logger.logInfo(s"Process terminated after kill")
-                  }
-            }
-          }
-        }
-        .map { case (p, _) => p }
-
-      p2.flatTap { cp =>
-        Resource.makeCase(cp.pid) {
+      p.flatTap { cp =>
+        Stream.bracketCase(cp.pid) {
           case (pid0, ExitCase.Canceled) =>
             outputBase match {
               case None => trace.logger.logWarn(s"No output base for task, cannot interrupt server")
@@ -68,7 +50,11 @@ class BazelAPI(
                           Stream
                             .repeatEval {
                               trace.logger.logInfo(s"Sending SIGINT to server $pid") *>
-                                CatsProcess.spawn[IO]("kill", "-2", pid.toString).use(_.statusCode)
+                                NuProcessAPI
+                                  .spawn(List("kill", "-2", pid.toString))
+                                  .evalMap(_.statusCode)
+                                  .compile
+                                  .lastOrError
                             }
                             .meteredStartImmediately(100.millis)
                             .compile
@@ -90,6 +76,18 @@ class BazelAPI(
       }
     }
 
+  def runSafe(b: Builder): Stream[IO, NuProcessAPI[IO]] =
+    run(b).flatTap { np =>
+      Stream.unit
+        .covary[IO]
+        .interruptWhen {
+          np.statusCode.map(_.code).flatMap {
+            case 0 => IO.never
+            case n => IO.raiseError(new Exception(s"Bazel command failed with exit code $n"))
+          }
+        }
+    }
+
   def builder(cmd: String, printLogs: Boolean, args: String*) = {
     val ob = outputBase.map(x => s"--output_base=${x.toString}").toList
     Builder(
@@ -100,36 +98,38 @@ class BazelAPI(
   }
 
   def runAndParse[A <: GeneratedMessage](cmd: String, args: String*)(implicit ev: GeneratedMessageCompanion[A]): IO[A] = {
-    run(builder(cmd, printLogs = false, args*))
-      .use { proc =>
+    runSafe(builder(cmd, printLogs = false, args*))
+      .evalMap { proc =>
         val fg = fs2.io
           .toInputStreamResource(proc.stdout)
           .use(is => IO.interruptibleMany(ev.parseFrom(is)))
 
-        fg <& proc.stderr.through(pipe).evalMap(logger.printStdErr).compile.drain <* proc.statusCode.map(_.code).flatMap {
-          case 0 => IO.unit
-          case n => IO.raiseError(new Exception(s"Bazel command failed with exit code $n"))
-        }
+        fg <& proc.stderr.through(pipe).evalMap(logger.printStdErr).compile.drain
       }
+      .compile
+      .lastOrError
   }
 
   def info: IO[Map[String, String]] =
-    run(builder("info", printLogs = false)).use { p =>
-      p.stdout
-        .through(pipe)
-        .evalMap { line =>
-          line.split(": ").toList match {
-            case k :: v :: Nil => IO.pure(Some(k -> v))
-            case _ =>
-              val msg = s"Unexpected output from bazel info: $line"
-              logger.logWarn(msg).as(None)
+    runSafe(builder("info", printLogs = false))
+      .evalMap { p =>
+        p.stdout
+          .through(pipe)
+          .evalMap { line =>
+            line.split(": ").toList match {
+              case k :: v :: Nil => IO.pure(Some(k -> v))
+              case _ =>
+                val msg = s"Unexpected output from bazel info: $line"
+                logger.logWarn(msg).as(None)
+            }
           }
-        }
-        .unNone
-        .concurrently(p.stderr.through(pipe).evalMap(logger.printStdErr))
-        .compile
-        .to(Map)
-    }
+          .unNone
+          .concurrently(p.stderr.through(pipe).evalMap(logger.printStdErr))
+          .compile
+          .to(Map)
+      }
+      .compile
+      .lastOrError
 
   def query(q: Query, extra: String*): IO[build.QueryResult] =
     runAndParse[build.QueryResult]("query", q.render :: "--output=proto" :: extra.toList: _*)
@@ -148,14 +148,17 @@ class BazelAPI(
   }
 
   def runUnitTask(op: String, cmds: String*): IO[Int] =
-    run(builder(op, printLogs = true, cmds*)).use { p =>
-      Stream
-        .eval(p.statusCode.map(_.code))
-        .concurrently(p.stdout.through(pipe).evalMap(logger.printStdOut))
-        .concurrently(p.stderr.through(pipe).evalMap(logger.printStdErr))
-        .compile
-        .lastOrError
-    }
+    run(builder(op, printLogs = true, cmds*))
+      .evalMap { p =>
+        Stream
+          .eval(p.statusCode.map(_.code))
+          .concurrently(p.stdout.through(pipe).evalMap(logger.printStdOut))
+          .concurrently(p.stderr.through(pipe).evalMap(logger.printStdErr))
+          .compile
+          .lastOrError
+      }
+      .compile
+      .lastOrError
 
   def runBuild(cmds: String*): IO[Int] = {
     runUnitTask(

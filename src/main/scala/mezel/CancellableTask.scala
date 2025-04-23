@@ -24,7 +24,9 @@ object CancellableTask {
                 lck.lock.surround {
                   ref.modify(m => (m - id, m.get(id).sequence_)).flatten *>
                     t.trace(s"got lock, starting fiber $id") {
-                      poll(task)
+                      poll {
+                        task.onError(e => t.logger.logError(s"Fiber $id failed with $e"))
+                      }
                     }.start
                       .flatTap(fib => ref.update(_ + (id -> fib.cancel)))
                 }
