@@ -176,7 +176,7 @@ object NuProcessAPI {
       }
     }
 
-    np <- Stream.bracket(IO(b.start())) { ph =>
+    np <- Stream.bracket(IO(Option(b.start()).get)) { ph =>
       val awaitStatus = IO.interruptibleMany(ph.waitFor(10, TimeUnit.SECONDS)).void
       IO(ph.destroy(false)) *> awaitStatus *> IO(ph.destroy(true)) *> awaitStatus
     }
