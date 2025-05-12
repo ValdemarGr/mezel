@@ -20,11 +20,9 @@ A non-exhaustive list of features that work:
 * BSP Task cancellation.
 * Cancellation of stale builds, saving a file mid-build restarts the build.
 
-Things that I will be working that Mezel doesn't support yet:
+Things that may be looked into:
 * Caching of output jars/ijars from local targets (improves DX on big refactorings since transitive jars will persist through bazel output extermination)
 * Support for an add-it-all-to-classpath mode such that you won't need to add a dependency to your BUILD.bazel for it to be available in your IDE?
-* Scala3 support [*](https://github.com/ValdemarGr/mezel/issues/12#issuecomment-1845372743)
-* Easier way to run commands on the same bazel server as the BSP uses.
 
 ## Getting started
 ### Scala rules setup
