@@ -552,7 +552,19 @@ class BspServerOps(
 
                       Files[IO].exists(p).flatMap {
                         case false =>
-                          trace.logger.logWarn(s"no diagnostics file for $label, this will cause a degraded experience").as(None)
+                          // Okay, as a heuristic lets check if there is a jar
+                          // for reasons unknown to me, sometimes there are no diagnostics (remote doesn't pull diagnostics?)
+                          val p2 = p.toString().replace(".diagnosticsproto", ".jar")
+                          Files[IO]
+                            .exists(Path(p2))
+                            .flatMap {
+                              // There's an output but no diagnostics file, assume everything went fine
+                              case true => IO.unit
+                              case false =>
+                                trace.logger
+                                  .logWarn(s"no diagnostics file for $label, this will cause a degraded experience, looked at \"${p}\"")
+                            }
+                            .as(None)
                         case true =>
                           Files[IO]
                             .readAll(p)

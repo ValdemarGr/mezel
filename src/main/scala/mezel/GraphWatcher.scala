@@ -27,10 +27,15 @@ class GraphWatcher(trace: Trace) {
   def simplyfyEvent(et0: EvType, et1: EvType): Option[EvType] = {
     import EvType._
     (et0, et1) match {
-      case (_, Deleted)  => None
-      case (_, Modified) => Some(Modified)
-      // must be deleted -> created = modified since any other combination is a bug
-      case (_, Created) => Some(Modified)
+      case (Deleted, Created)   => Some(Modified)
+      case (Deleted, Deleted)   => Some(Deleted) // err
+      case (Deleted, Modified)  => Some(Modified) // err
+      case (Created, Modified)  => Some(Created)
+      case (Created, Created)   => Some(Created) // err
+      case (Created, Deleted)   => None
+      case (Modified, Deleted)  => Some(Deleted)
+      case (Modified, Modified) => Some(Modified)
+      case (Modified, Created)  => Some(Modified) // err
     }
   }
 
