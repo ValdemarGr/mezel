@@ -1,6 +1,16 @@
-###############################################################################
-# Bazel now uses Bzlmod by default to manage external dependencies.
-# Please consider migrating your external dependencies from WORKSPACE to MODULE.bazel.
-#
-# For more details, please check https://github.com/bazelbuild/bazel/issues/18958
-###############################################################################
+module(name='mezel')
+
+http_jar = use_repo_rule(
+  "@bazel_tools//tools/build_defs/repo:http.bzl",
+  "http_jar",
+)
+
+version = "release-v0.2.12"
+mezel_jar = http_jar(
+    name = "mezel_binary",
+    url = "https://github.com/valdemargr/mezel/releases/download/{}/{}".format(version, "mezel.jar"),
+    sha256 = "c3d9a80407760f06c07b46ee4bffb6c8061a06490ad6817c8fda3da7e9323d94",
+)
+
+
+bazel_dep(name = "rules_scala", version = "7.1.2")

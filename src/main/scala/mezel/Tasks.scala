@@ -15,7 +15,7 @@ class Tasks(
     trace: Trace,
     outputBase: Path
 ) {
-  val aspect = "@mezel//aspects:aspect.bzl%mezel_aspect"
+  val aspect = "@mezel//aspects:aspect_new_buildrules.bzl%mezel_aspect"
 
   def api = BazelAPI(uriToPath(root), buildArgs, aqueryArgs, logger, trace, Some(outputBase))
 
