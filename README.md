@@ -2,23 +2,25 @@
 Mezel is a Scala [BSP](https://build-server-protocol.github.io/) implementation for Bazel.
 Mezel acts as a communication layer between Bazel and Scala BSP consumers such as [Metals](https://scalameta.org/metals/).
 
-Mezel is work-in-progress. I daily drive it with Metals using NeoVim, but any Metals-enabled editor works.
-A non-exhaustive list of features that work:
+Mezel is work-in-progress. I daily drive it with Metals using NeoVim, all Metals-enabled editors are supported.
+I use mezel for scala 2 and 3, with `io_bazel_rules_scala` and `rules_scala`.
+A non-exhaustive list of features that Mezel provides:
 * Semanticdb consumption from Bazel (code navigation).
 * External dependencies (from maven for instance, but also locally built and imported jars).
-* Presentation compiler support with plugins (type hints and such).
+* Presentation compiler with plugins.
 * Caching of semanticdb files (bazel clears the output directory on every build).
 * Streamed diagnostics reporting for errors and warnings (diagnostics will appear as they are generated instead of waiting for the build to finish).
 * Build change propagation (mezel always builds all targets so you get full diagnostics).
 * Logging of all build events with performance traces.
 * Build isolation, uses a custom `--output_base` to avoid destroying your build cache.
 * Custom build/query flags.
-* Semi-automatic configuration generation.
 * Minimal build target definitons using ijars over jars.
 * Automatic reload on build change.
 * IntelliJ support (lightly tested).
 * BSP Task cancellation.
 * Cancellation of stale builds, saving a file mid-build restarts the build.
+* Bazel-managed versioned BSP server (Mezel), no auto-upgrade breakage.
+* Code-generated targets support (protobuf, grpc, openapi and any custom generator).
 
 Things that may be looked into:
 * Caching of output jars/ijars from local targets (improves DX on big refactorings since transitive jars will persist through bazel output extermination)
@@ -87,6 +89,7 @@ config_setting(
 ```
 
 ### Mezel setup
+#### `WORKSPACE` setup
 Mezel needs an aspect to work, so add the following to your `WORKSPACE` file to get it into scope:
 ```starlark
 mezel_version = "eb871ad6c2dffd3a059ea6ebc9f25a22867cf6d5"
@@ -101,6 +104,24 @@ http_archive(
 load("@mezel//rules:load_mezel.bzl", "load_mezel")
 load_mezel()
 ```
+
+#### `MODULE.bazel` setup
+For bazel `MODULE`s we need a module extension to load the Mezel jar into into your bazel project's root scope.
+```starlark
+mezel_version = "eb871ad6c2dffd3a059ea6ebc9f25a22867cf6d5"
+http_archive(
+    name = "mezel",
+    sha256 = "00b3585f329aca7070e6ccd76ce082f470cd1734e971950ae021d20fb3b32164",
+    strip_prefix = "mezel-%s" % mezel_version,
+    type = "zip",
+    url = "https://github.com/valdemargr/mezel/archive/%s.zip" % mezel_version,
+)
+mezel_binary_ext = use_extension("@mezel//:extensions.bzl", "mezel_binary")
+mezel_binary_ext.mezel_binary()
+use_repo(mezel_binary_ext, "mezel_binary")
+```
+
+#### Running Mezel
 The Mezel BSP program will expect the Mezel aspect to be at the label `@mezel//aspects:aspect.bzl`, so make sure to name the `http_achive` `mezel` like in the example.
 
 Now we have a Mezel binary to run.
@@ -114,12 +135,12 @@ Create a config for Metals at `.bsp/mezel.json`:
 And that's it. Start your editor and select `Mezel` as your BSP server.
 
 ### External dependencies
-External dependencies should work but have only been tested with [rules_jvm_external](https://github.com/bazelbuild/rules_jvm_external).
+External dependencies should work for any jar-exposing rule, but have only been tested with [rules_jvm_external](https://github.com/bazelbuild/rules_jvm_external).
 When you import external dependencies you must ensure that you fetch their sources, such that there are sources to navigate to on "goto definition" type actions.
-For rules_jvm_external you can flag this in your `maven_install` as seen [here](https://github.com/bazelbuild/rules_jvm_external#fetch-source-jars).
+For `rules_jvm_external` you can flag this in your `maven_install` as seen [here](https://github.com/bazelbuild/rules_jvm_external#fetch-source-jars).
 
 ### Configuration
-I suggest checking your bsp file into VCS `.bsp/mezel.json` so it works for other developers without any configuration.
+I suggest checking your bsp file into VCS `.bsp/mezel.json` so it works for others on checkout.
 
 A configuration example that uses a custom toolchain and set of configuration options for local development (semanticdb + diagnostics + no fatal warnings):
 ```json
@@ -151,6 +172,8 @@ echo "bazel-$(basename $PWD)" >> .bazelignore
 You can try building the aspect yourself. This will emit information about what the mezel aspect finds in your build.
 ```bash
 bazel build '//...' --aspects '@mezel//aspects:aspect.bzl%mezel_aspect' '--output_groups=bsp_info,bsp_info_deps'
+# or for the newer rules_scala rules
+bazel build '//...' --aspects '@mezel//aspects:aspect_new_buildrules.bzl%mezel_aspect' '--output_groups=bsp_info,bsp_info_deps'
 ```
 
 Mezel can also emit more detailed execution information by providing up to 3 `-v` flags:
