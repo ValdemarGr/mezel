@@ -93,9 +93,10 @@ config_setting(
 Mezel needs an aspect to work, so add the following to your `WORKSPACE` file to get it into scope:
 ```starlark
 mezel_version = "b324ce6fd42defb0623c080fac225dfe4bffbc57"
+mezel_hash = "9ed594b6d93a8da6d9893ffb058dc7e25cf008123f335ce2cd7daba160fba50e"
 http_archive(
     name = "mezel",
-    sha256 = "9ed594b6d93a8da6d9893ffb058dc7e25cf008123f335ce2cd7daba160fba50e",
+    sha256 = mezel_hash,
     strip_prefix = "mezel-%s" % mezel_version,
     type = "zip",
     url = "https://github.com/valdemargr/mezel/archive/%s.zip" % mezel_version,
@@ -109,9 +110,11 @@ load_mezel()
 For bazel `MODULE`s we need a module extension to load the Mezel jar into into your bazel project's root scope.
 ```starlark
 mezel_version = "b324ce6fd42defb0623c080fac225dfe4bffbc57"
-http_archive(
-    name = "mezel",
-    sha256 = "00b3585f329aca7070e6ccd76ce082f470cd1734e971950ae021d20fb3b32164",
+mezel_hash = "9ed594b6d93a8da6d9893ffb058dc7e25cf008123f335ce2cd7daba160fba50e"
+bazel_dep(name = "mezel", version = "1.0.0")
+archive_override(
+    module_name = "mezel",
+    sha256 = mezel_hash,
     strip_prefix = "mezel-%s" % mezel_version,
     type = "zip",
     url = "https://github.com/valdemargr/mezel/archive/%s.zip" % mezel_version,
