@@ -8,17 +8,10 @@ import fs2.io.file.*
 import cats.*
 
 class Tasks(
-    root: SafeUri,
-    buildArgs: List[String],
-    aqueryArgs: List[String],
-    logger: Logger,
     trace: Trace,
-    outputBase: Path
+    api: BazelAPI,
+    aspect: String
 ) {
-  val aspect = "@mezel//aspects:aspect_new_buildrules.bzl%mezel_aspect"
-
-  def api = BazelAPI(uriToPath(root), buildArgs, aqueryArgs, logger, trace, Some(outputBase))
-
   def buildTargetCache(execRoot: Path): IO[BuildTargetCache] =
     buildTargetFiles(execRoot).map(xs => xs.map(x => x.label -> x)).map(BuildTargetCache(_)) // .flatMap(fromTargets)
 

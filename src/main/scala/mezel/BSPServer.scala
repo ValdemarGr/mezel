@@ -219,7 +219,8 @@ final case class BspCacheKeys(
     derivedEnv: CacheKey[Map[String, String]],
     buildTargetCache: CacheKey[BuildTargetCache],
     diagnosticsFiles: CacheKey[Map[Label, Path]],
-    dependencyGraph: CacheKey[DependencyGraph]
+    dependencyGraph: CacheKey[DependencyGraph],
+    newRules: CacheKey[Boolean]
 )
 
 object BspCacheKeys {
@@ -227,7 +228,8 @@ object BspCacheKeys {
     CacheKey.make[Map[String, String]],
     CacheKey.make[BuildTargetCache],
     CacheKey.make[Map[Label, Path]],
-    CacheKey.make[DependencyGraph]
+    CacheKey.make[DependencyGraph],
+    CacheKey.make[Boolean]
   ).mapN(BspCacheKeys.apply)
 }
 
@@ -293,6 +295,35 @@ class BspServerOps(
       derivedExecRoot.flatMap(execRoot => tasks.flatMap(_.buildTargetCache(execRoot)))
     }
 
+  def activeAspect: IO[String] =
+    cached("activeRules")(_.newRules) {
+      bazelAPI.flatMap(_.runUnitTask("query", "@io_bazel_rules_scala_config//:all")).flatMap {
+        case 0 =>
+          logger.logInfo("found io_bazel_rules_scala_config, using old aspect").as(false)
+        case n =>
+          logger.logInfo("did not find io_bazel_rules_scala_config, attempting `rules_scala`") *>
+            bazelAPI.flatMap(_.runUnitTask("query", "@rules_scala//:all")).flatMap {
+              case 0 =>
+                logger.logInfo("found rules_scala, using new aspect").as(true)
+              case n =>
+                logger
+                  .logWarn("did not find rules_scala or io_bazel_rules_scala_config, defaulting to old aspect?")
+                  .as(false)
+            }
+      }
+    }.map {
+      case true  => "@mezel//aspects:aspect_new_buildrules.bzl%mezel_aspect"
+      case false => "@mezel//aspects:aspect.bzl%mezel_aspect"
+    }
+
+  def bazelAPI: IO[BazelAPI] = {
+    workspaceRoot.flatMap { root =>
+      outputBaseFromSource.map { outputBase =>
+        BazelAPI(uriToPath(root), buildArgs, aqueryArgs, logger, trace, Some(outputBase))
+      }
+    }
+  }
+
   def prevDiagnostics: IO[Map[BuildTargetIdentifier, List[TextDocumentIdentifier]]] =
     state.get.map(_.prevDiagnostics)
 
@@ -322,7 +353,7 @@ class BspServerOps(
 
   def derivedEnv: IO[Map[String, String]] =
     cached("derivedEnv")(_.derivedEnv) {
-      workspaceRoot.flatMap(mkTasks).flatMap(_.api.info)
+      bazelAPI.flatMap(_.info)
     }
 
   def derivedExecRoot: IO[Path] =
@@ -374,8 +405,10 @@ class BspServerOps(
   // }
 
   def mkTasks(rootUri: SafeUri) = {
-    outputBaseFromSource.map { ob =>
-      Tasks(rootUri, buildArgs, aqueryArgs, logger, trace, ob)
+    activeAspect.flatMap { aspect =>
+      bazelAPI.map { api =>
+        Tasks(trace, api, aspect)
+      }
     }
   }
 
@@ -562,7 +595,7 @@ class BspServerOps(
                               case true => IO.unit
                               case false =>
                                 trace.logger
-                                  .logWarn(s"no diagnostics file for $label, this will cause a degraded experience, looked at \"${p}\"")
+                                  .logWarn(s"no diagnostics file for $label, this can cause a degraded experience or may just be a skipped build target, looked at \"${p}\"")
                             }
                             .as(None)
                         case true =>
