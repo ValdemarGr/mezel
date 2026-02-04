@@ -39,7 +39,8 @@ class BSPServerLifecycle(
       deps.cache,
       deps.cacheKeys,
       deps.ct,
-      verbose
+      verbose,
+      inMemory=true
     )
 
   def runRequest(trace: Trace, id: Option[RpcId])(res: IO[Either[BspResponseError, Option[Json]]]): IO[Option[Json]] = {
@@ -132,6 +133,25 @@ class BSPServerLifecycle(
     }
   }
 
+  def reqStr(req: Request): String =
+    s"${req.id.map(_.value.toString()).getOrElse("?")}: ${req.method}"
+
+  def logSlowRequest[A](lg: Logger, req: Request)(ioa: IO[A]): IO[A] = {
+    import scala.concurrent.duration.*
+    val doLogging = IO.realTime.flatMap { t0 =>
+      def go: IO[Nothing] = IO.defer {
+        val d = 10.seconds
+        IO.sleep(d) *>
+          IO.realTime.flatMap { t1 =>
+            val elapsed = (t1 - t0).toSeconds
+            lg.logInfo(s"[SLOWLOG] Operation \"${reqStr(req)}\" is still running after ${elapsed} seconds...")
+          } >> go
+      }
+      go
+    }
+    IO.race(doLogging, ioa).map(_.merge)
+  }
+
   def start(
       stdin: fs2.Stream[IO, Byte],
       stdout: fs2.Pipe[IO, Byte, Unit]
@@ -144,9 +164,11 @@ class BSPServerLifecycle(
               val originId = req.params.flatMap(_.asObject).flatMap(_.apply("originId")).flatMap(_.asString)
               val lg = logger(originId)
               val fa: IO[Option[Json]] =
-                Trace.in(s"${req.id.map(_.value.toString()).getOrElse("?")}: ${req.method}", lg).flatMap { trace =>
-                  runRequest(trace, req.id) {
-                    handleRequest(trace, lg, req)
+                logSlowRequest(lg, req) {
+                  Trace.in(reqStr(req), lg).flatMap { trace =>
+                    runRequest(trace, req.id) {
+                      handleRequest(trace, lg, req)
+                    }
                   }
                 }
 

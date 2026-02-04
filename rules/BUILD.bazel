@@ -1,5 +1,9 @@
 java_binary(
   name = "mezel_jar",
   main_class = "mezel.Main",
-  runtime_deps = ["@mezel_binary//jar"]
+  runtime_deps = ["@mezel_binary//jar"],
+  jvm_flags = [
+      "-XX:+UseG1GC",
+      "-XX:+UseStringDeduplication",
+  ],
 )

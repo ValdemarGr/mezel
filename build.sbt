@@ -1,9 +1,9 @@
-enablePlugins(GraalVMNativeImagePlugin)
+// enablePlugins(GraalVMNativeImagePlugin)
 
-ThisBuild / scalaVersion := "3.3.1"
+ThisBuild / scalaVersion := "3.7.4"
 ThisBuild / organization := "io.github.valdemargr"
 
-ThisBuild / tlBaseVersion := "0.2"
+ThisBuild / tlBaseVersion := "0.3"
 ThisBuild / tlUntaggedAreSnapshots := false
 ThisBuild / tlSonatypeUseLegacyHost := true
 ThisBuild / tlFatalWarnings := false
@@ -85,10 +85,10 @@ lazy val root = project
       "com.monovore" %% "decline-effect" % "2.4.1"
     ),
     fork := true,
-    graalVMNativeImageOptions ++= Seq(
-      "--initialize-at-build-time",
-      "--no-fallback"
-    ),
+    // graalVMNativeImageOptions ++= Seq(
+    //   "--initialize-at-build-time",
+    //   "--no-fallback"
+    // ),
     assembly / mainClass := Some("mezel.Main"),
     assembly / assemblyOutputPath := file("target/mezel.jar")
   )
@@ -100,9 +100,9 @@ lazy val filesystemIO = project
   .settings(
     name := "mezel-filesystem-io",
     fork := true,
-    graalVMNativeImageOptions ++= Seq(
-      "--initialize-at-build-time",
-      "--no-fallback"
-    )
+    // graalVMNativeImageOptions ++= Seq(
+    //   "--initialize-at-build-time",
+    //   "--no-fallback"
+    // )
   )
-  .enablePlugins(GraalVMNativeImagePlugin)
+  // .enablePlugins(GraalVMNativeImagePlugin)
