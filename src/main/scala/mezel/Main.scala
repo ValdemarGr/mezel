@@ -33,29 +33,39 @@ object Main
     )
     .orEmpty
 
-  val verbose: Opts[Verbosity] = Opts.flags(
-    "verbose",
-    "Enable verbose logging and tracing.",
-    short="v"
-  ).map(Verbosity.fromInt).withDefault(Verbosity.Normal)
+  val verbose: Opts[Verbosity] = Opts
+    .flags(
+      "verbose",
+      "Enable verbose logging and tracing.",
+      short = "v"
+    )
+    .map(Verbosity.fromInt)
+    .withDefault(Verbosity.Normal)
 
-  def main: Opts[IO[ExitCode]] = (fsFlag, buildArgsFlag, aqueryArgsFlag, verbose)
-    .mapN { case (fs, buildArgs, aqueryArgs, verbose) =>
-    val (stdin, stdout) = if (fs) {
-      (
-        Files[IO].tail(Path("/tmp/from-metals")),
-        Files[IO].writeAll(Path("/tmp/to-metals"))
-      )
-    } else {
-      (
-        fs2.io.stdin[IO](4096),
-        fs2.io.stdout[IO]
-      )
-    }
+  val singleProject: Opts[Boolean] = Opts
+    .flag(
+      "single-project",
+      "Run the BSP server in single-project mode, which assumes a single workspace."
+    )
+    .orFalse
 
-    BSPServerDeps.make.use{ deps =>
-      val bsl = new BSPServerLifecycle(buildArgs, aqueryArgs, deps, verbose)
-      bsl.start(stdin, stdout).as(ExitCode.Success)
+  def main: Opts[IO[ExitCode]] = (fsFlag, buildArgsFlag, aqueryArgsFlag, verbose, singleProject)
+    .mapN { case (fs, buildArgs, aqueryArgs, verbose, singleProject) =>
+      val (stdin, stdout) = if (fs) {
+        (
+          Files[IO].tail(Path("/tmp/from-metals")),
+          Files[IO].writeAll(Path("/tmp/to-metals"))
+        )
+      } else {
+        (
+          fs2.io.stdin[IO](4096),
+          fs2.io.stdout[IO]
+        )
+      }
+
+      BSPServerDeps.make.use { deps =>
+        val bsl = new BSPServerLifecycle(buildArgs, aqueryArgs, deps, verbose, singleProject)
+        bsl.start(stdin, stdout).as(ExitCode.Success)
+      }
     }
-  }
 }

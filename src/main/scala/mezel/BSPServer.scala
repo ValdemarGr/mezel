@@ -1,5 +1,6 @@
 package mezel
 
+import scala.collection.mutable
 import com.google.devtools.build.lib.analysis.analysis_v2
 import cats.implicits.*
 import io.circe.parser.*
@@ -9,7 +10,6 @@ import cats.effect.{Trace => _, *}
 import fs2.io.file.*
 import _root_.io.circe.Json
 import cats.data.*
-import fs2.concurrent.SignallingRef
 import catcheffect.*
 import cats.*
 import java.nio.file.Paths
@@ -128,9 +128,6 @@ def pathToUri(p: Path): SafeUri =
 def pathFullToUri(root: SafeUri, p: Path): SafeUri =
   SafeUri((uriToPath(root) / p).toNioPath.toUri().toString())
 
-def buildIdent(label: Label): BuildTargetIdentifier =
-  BuildTargetIdentifier(SafeUri(label.value))
-
 def uriToPath(suri: SafeUri): Path = Path.fromNioPath(Paths.get(new URI(suri.value)))
 
 object BspState {
@@ -234,7 +231,8 @@ object BspCacheKeys {
 }
 
 class BspServerOps(
-    state: SignallingRef[IO, BspState],
+    state: Ref[IO, BspState],
+    prevDiags: MtxRef[mutable.Map[Label, List[TextDocumentIdentifier]]],
     sup: Supervisor[IO],
     output: Channel[IO, Json],
     buildArgs: List[String],
@@ -244,9 +242,17 @@ class BspServerOps(
     cache: Cache,
     cacheKeys: BspCacheKeys,
     ct: CancellableTask,
-    verbose: Verbose
+    verbose: Verbose,
+    singleProject: Boolean
 )(implicit R: Raise[IO, BspResponseError]) {
   import _root_.io.circe.syntax.*
+
+  def buildIdent(label: Label): BuildTargetIdentifier =
+    if (singleProject) {
+      BuildTargetIdentifier(SafeUri("root"))
+    } else {
+      BuildTargetIdentifier(SafeUri(label.value))
+    }
 
   def cached[A](name: String)(key: BspCacheKeys => CacheKey[A])(run: => IO[A]): IO[A] =
     cache.cached(key(cacheKeys))(trace.logger.logInfo(s"cache miss for $name, running action") *> run)
@@ -255,7 +261,6 @@ class BspServerOps(
   // TODO, we can stream the results out into json
   def readBuildTargetCache[A](f: BuildTargetCache => Stream[IO, (Label, A)]): IO[List[(Label, A)]] = {
     val fa = for {
-      curr <- Stream.eval(state.get)
       btc <- Stream.eval(buildTargetCache)
       res <- f(btc)
     } yield res
@@ -326,12 +331,6 @@ class BspServerOps(
 
   def prevDiagnostics: IO[Map[BuildTargetIdentifier, List[TextDocumentIdentifier]]] =
     state.get.map(_.prevDiagnostics)
-
-  def cacheDiagnostic(buildTarget: BuildTargetIdentifier, td: TextDocumentIdentifier): IO[Unit] =
-    state.update { s =>
-      val newState = Map(buildTarget -> List(td)) |+| s.prevDiagnostics
-      s.copy(prevDiagnostics = newState)
-    }
 
   def publishDiagnostics(x: PublishDiagnosticsParams): IO[Unit] =
     sendNotification("build/publishDiagnostics", x.asJson)
@@ -525,16 +524,19 @@ class BspServerOps(
               val scalacOptionsMap = scalacOptions.toMap
               val bspLabels = xs.map { case (id, _) => id }.toSet
 
-              def diagnosticEffect(bti: BuildTargetIdentifier, xs: List[PublishDiagnosticsParams]): IO[Unit] =
-                IO.uncancelable { _ =>
-                  val prevHere = prevDiagnostics.get(bti).toList.flatten
-                  val toClear = prevHere.toSet -- xs.map(_.textDocument)
+              def diagnosticEffect(label: Label, xs: List[PublishDiagnosticsParams]): IO[Unit] =
+                prevDiags.use(x => IO(x.get(label))).flatMap { prevs =>
+                  IO.uncancelable { _ =>
+                    val bti = buildIdent(label)
+                    val prevHere = prevs.getOrElse(Nil)
+                    val toClear = prevHere.toSet -- xs.map(_.textDocument)
 
-                  state.update(s => s.copy(prevDiagnostics = s.prevDiagnostics - bti)) *>
-                    xs.traverse(x => publishDiagnostics(x) *> cacheDiagnostic(bti, x.textDocument)) *>
-                    toClear.toList
-                      .map(PublishDiagnosticsParams(_, bti, None, Nil, true))
-                      .traverse_(publishDiagnostics)
+                    xs.traverse_(publishDiagnostics) >>
+                      prevDiags.mut(_ += ((label, xs.map(_.textDocument)))) >>
+                      toClear.toList
+                        .map(PublishDiagnosticsParams(_, bti, None, Nil, true))
+                        .traverse_(publishDiagnostics)
+                  }
                 }
 
               val labelStream =
@@ -569,7 +571,7 @@ class BspServerOps(
                             // clear all previous diagnostics for this target
                             else {
                               verbose.debug(trace.logger.logInfo(s"$label is eliminated, skipping")) *>
-                                diagnosticEffect(buildIdent(label), Nil).as(false)
+                                diagnosticEffect(label, Nil).as(false)
                             }
                           }
                     }
@@ -595,7 +597,9 @@ class BspServerOps(
                               case true => IO.unit
                               case false =>
                                 trace.logger
-                                  .logWarn(s"no diagnostics file for $label, this can cause a degraded experience or may just be a skipped build target, looked at \"${p}\"")
+                                  .logWarn(
+                                    s"no diagnostics file for $label, this can cause a degraded experience or may just be a skipped build target, looked at \"${p}\""
+                                  )
                             }
                             .as(None)
                         case true =>
@@ -615,7 +619,7 @@ class BspServerOps(
                   val bti = buildIdent(label)
                   tdOpt.toList
                     .flatTraverse(convertDiagnostic(trace.logger, wsr, bti, _))
-                    .flatMap(diagnosticEffect(bti, _))
+                    .flatMap(diagnosticEffect(label, _))
                 }
 
                 // if success then there are semanticdb files to publish

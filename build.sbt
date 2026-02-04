@@ -3,7 +3,7 @@ enablePlugins(GraalVMNativeImagePlugin)
 ThisBuild / scalaVersion := "3.3.1"
 ThisBuild / organization := "io.github.valdemargr"
 
-ThisBuild / tlBaseVersion := "0.2"
+ThisBuild / tlBaseVersion := "0.3"
 ThisBuild / tlUntaggedAreSnapshots := false
 ThisBuild / tlSonatypeUseLegacyHost := true
 ThisBuild / tlFatalWarnings := false

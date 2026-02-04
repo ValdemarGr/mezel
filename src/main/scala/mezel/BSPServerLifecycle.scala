@@ -17,7 +17,8 @@ class BSPServerLifecycle(
     buildArgs: List[String],
     aqueryArgs: List[String],
     deps: BSPServerDeps,
-    verbosity: Verbosity
+    verbosity: Verbosity,
+    singleProject: Boolean
 ) {
   def verbose: Verbose = Verbose.make(verbosity)
 
@@ -30,6 +31,7 @@ class BSPServerLifecycle(
   def makeOps(trace: mezel.Trace, logger: Logger): Raise[IO, BspResponseError] ?=> BspServerOps = R ?=>
     new BspServerOps(
       deps.state,
+      ???,
       deps.sup,
       deps.output,
       buildArgs,
@@ -39,7 +41,8 @@ class BSPServerLifecycle(
       deps.cache,
       deps.cacheKeys,
       deps.ct,
-      verbose
+      verbose,
+      singleProject
     )
 
   def runRequest(trace: Trace, id: Option[RpcId])(res: IO[Either[BspResponseError, Option[Json]]]): IO[Option[Json]] = {
