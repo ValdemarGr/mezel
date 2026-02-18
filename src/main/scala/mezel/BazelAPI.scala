@@ -37,13 +37,20 @@ class BazelAPI(
             outputBase match {
               case None => trace.logger.logWarn(s"No output base for task, cannot interrupt server")
               case Some(p) =>
-                trace.logger.logInfo(s"Bazel task cancelled, reading the server's pid from ${p}") *>
+                val readServerPid =
                   Files[IO]
                     .readAll(p / "server" / "server.pid.txt")
                     .through(pipe)
                     .compile
                     .string
                     .map(_.toInt)
+                    .timeoutTo(
+                      10.seconds,
+                      trace.logger.logError(s"Couldn't read server pid after 10 seconds? File reading issue?")
+                    )
+
+                val go = trace.logger.logInfo(s"Bazel task cancelled, reading the server's pid from ${p}") *>
+                  readServerPid
                     .flatMap { pid =>
                       trace.logger.logInfo(s"Found server pid $pid, sending SIGINTs until the client exists") *>
                         IO.race(
@@ -70,6 +77,11 @@ class BazelAPI(
                       case Left(e)  => trace.logger.logWarn(s"Error while trying to interrupt server: $e")
                       case Right(_) => trace.logger.logInfo(s"Shutting down client process ${pid0}")
                     }
+
+                go.timeoutTo(
+                  30.seconds,
+                  trace.logger.logWarn(s"Couldn't interrupt the server after 30 seconds.")
+                )
             }
           case _ => IO.unit
         }
@@ -97,7 +109,9 @@ class BazelAPI(
     )
   }
 
-  def runAndParse[A <: GeneratedMessage](cmd: String, args: String*)(implicit ev: GeneratedMessageCompanion[A]): IO[A] = {
+  def runAndParse[A <: GeneratedMessage](cmd: String, args: String*)(implicit
+      ev: GeneratedMessageCompanion[A]
+  ): IO[A] = {
     runSafe(builder(cmd, printLogs = false, args*))
       .evalMap { proc =>
         val fg = fs2.io
