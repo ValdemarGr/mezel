@@ -93,8 +93,8 @@ config_setting(
 #### `WORKSPACE` setup
 Mezel needs an aspect to work, so add the following to your `WORKSPACE` file to get it into scope:
 ```starlark
-mezel_version = "ce74bdc4dfe614b8cfabbe6df73f52e85f114beb"
-mezel_hash = "399a9e93e9c8bd3461890980047d1f2b28dd3350e5390f72d59c816a0f0bfda2"
+mezel_version = "59661f3d39ac9415794b28862cf9b3a214f0f90d"
+mezel_hash = "c723745f55986a3c1947a9bbdd9bd9addfa543ea55d66ebcf39ea4c54cab611d"
 http_archive(
     name = "mezel",
     sha256 = mezel_hash,
@@ -110,8 +110,8 @@ load_mezel()
 #### `MODULE.bazel` setup
 For bazel `MODULE`s we need a module extension to load the Mezel jar into into your bazel project's root scope.
 ```starlark
-mezel_version = "ce74bdc4dfe614b8cfabbe6df73f52e85f114beb"
-mezel_hash = "399a9e93e9c8bd3461890980047d1f2b28dd3350e5390f72d59c816a0f0bfda2"
+mezel_version = "59661f3d39ac9415794b28862cf9b3a214f0f90d"
+mezel_hash = "c723745f55986a3c1947a9bbdd9bd9addfa543ea55d66ebcf39ea4c54cab611d"
 bazel_dep(name = "mezel", version = "1.0.0")
 archive_override(
     module_name = "mezel",
