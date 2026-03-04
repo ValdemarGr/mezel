@@ -38,6 +38,7 @@ jobs:
           sed -i "s|version =.*$|version = \"${DERIVED_VERSION}\"|" MODULE.bazel
 
           git add rules/load_mezel.bzl
+          git add MODULE.bazel
           git commit -m "automatic update of mezel artifact location to ${{ github.ref_name }}"
           ARTIFACT_COMMIT_HASH=$(git rev-parse HEAD)
           git push origin HEAD:main
