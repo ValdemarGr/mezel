@@ -34,6 +34,9 @@ jobs:
           sed -i "s|sha256 =.*$|sha256 = \"${ARTIFACT_HASH}\",|" rules/load_mezel.bzl
           sed -i "s|version =.*$|version = \"${DERIVED_VERSION}\"|" rules/load_mezel.bzl
 
+          sed -i "s|sha256 =.*$|sha256 = \"${ARTIFACT_HASH}\",|" MODULE.bazel
+          sed -i "s|version =.*$|version = \"${DERIVED_VERSION}\"|" MODULE.bazel
+
           git add rules/load_mezel.bzl
           git commit -m "automatic update of mezel artifact location to ${{ github.ref_name }}"
           ARTIFACT_COMMIT_HASH=$(git rev-parse HEAD)

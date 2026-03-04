@@ -5,11 +5,11 @@ http_jar = use_repo_rule(
   "http_jar",
 )
 
-version = "release-v0.2.12"
+version = "release-v0.4.0"
 mezel_jar = http_jar(
     name = "mezel_binary",
     url = "https://github.com/valdemargr/mezel/releases/download/{}/{}".format(version, "mezel.jar"),
-    sha256 = "c3d9a80407760f06c07b46ee4bffb6c8061a06490ad6817c8fda3da7e9323d94",
+    sha256 = "bea23682abbac4b915cb0c993909a7b6d53d8a793a07bec5c03c86f4c81a3922",
 )
 
 

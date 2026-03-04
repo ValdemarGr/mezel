@@ -30,6 +30,7 @@ Things that may be looked into:
 ### Scala rules setup
 Make sure that you are using version `f9381414068466b9c74ff7681d204e1eb19c7f80` or newer of the bazel scala rules.
 Failing to do so will cause issues with generation of diagnostics.
+#### Workspace example:
 ```starlark
 rules_scala_version = "f9381414068466b9c74ff7681d204e1eb19c7f80"  # update this as needed
 
@@ -41,7 +42,7 @@ http_archive(
     url = "https://github.com/bazelbuild/rules_scala/archive/%s.zip" % rules_scala_version,
 )
 ```
-
+### Toolchain setup
 Your Scala toolchain needs to be configured to emit semanticdb files and diagnostics.
 I recommend having a separate toolchain for your LSP server, so that you can have different settings for it.
 ```starlark
@@ -119,9 +120,6 @@ archive_override(
     type = "zip",
     url = "https://github.com/valdemargr/mezel/archive/%s.zip" % mezel_version,
 )
-mezel_binary_ext = use_extension("@mezel//:extensions.bzl", "mezel_binary")
-mezel_binary_ext.mezel_binary()
-use_repo(mezel_binary_ext, "mezel_binary")
 ```
 
 #### Running Mezel
