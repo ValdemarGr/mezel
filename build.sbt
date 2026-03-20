@@ -43,7 +43,7 @@ lazy val sharedSettings = Seq(
     } else Seq.empty // Seq("-no-indent")
   },
   libraryDependencies ++= Seq(
-    "org.typelevel" %% "cats-effect" % "3.5.2",
+    "org.typelevel" %% "cats-effect" % "3.7.0",
     "org.typelevel" %% "cats-core" % "2.9.0",
     "org.typelevel" %% "cats-parse" % "0.3.8",
     "org.typelevel" %% "vault" % "3.5.0",
