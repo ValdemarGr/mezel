@@ -13,4 +13,4 @@ mezel_jar = http_jar(
 )
 
 
-bazel_dep(name = "rules_scala", version = "release-v0.5.1"
+bazel_dep(name = "rules_scala", version = "7.1.2")

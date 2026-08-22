@@ -35,7 +35,7 @@ jobs:
           sed -i "s|version =.*$|version = \"${DERIVED_VERSION}\"|" rules/load_mezel.bzl
 
           sed -i "s|sha256 =.*$|sha256 = \"${ARTIFACT_HASH}\",|" MODULE.bazel
-          sed -i "s|version =.*$|version = \"${DERIVED_VERSION}\"|" MODULE.bazel
+          sed -i "s|^version =.*$|version = \"${DERIVED_VERSION}\"|" MODULE.bazel
 
           git add rules/load_mezel.bzl
           git add MODULE.bazel
