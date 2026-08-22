@@ -2,10 +2,11 @@ package mezel
 
 import io.circe.*
 import _root_.io.circe.Json
+import cats.implicits.*
 
 final case class RpcId(value: String | Int) extends AnyVal
 object RpcId:
-  given Decoder[RpcId] = (Decoder[String] or Decoder[String]).map(RpcId(_))
+  given Decoder[RpcId] = (Decoder[String].widen[String | Int] or Decoder[Int].widen[String | Int]).map(RpcId(_))
   given Encoder[RpcId] = Encoder.instance[RpcId] {
     case RpcId(value: String) => Encoder[String].apply(value)
     case RpcId(value: Int)    => Encoder[Int].apply(value)

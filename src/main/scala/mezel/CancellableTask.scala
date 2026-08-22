@@ -16,33 +16,53 @@ trait CancellableTask {
 object CancellableTask {
   def make: Resource[IO, CancellableTask] = {
     Resource.eval(Mutex[IO]).flatMap { lck =>
-      Resource.make(IO.ref(Map.empty[String, IO[Unit]]))(_.get.flatMap(_.values.toList.sequence_)).map { ref =>
-        new CancellableTask {
-          def startFiber[A](t: Trace, id: String, task: IO[A]): IO[FiberIO[A]] =
-            t.trace(s"starting fiber $id, awaiting lock") {
-              IO.uncancelable { poll =>
-                lck.lock.surround {
-                  ref.modify(m => (m - id, m.get(id).sequence_)).flatten *>
-                    t.trace(s"got lock, starting fiber $id") {
-                      poll {
-                        task.onError(e => t.logger.logError(s"Fiber $id failed with $e"))
-                      }
-                    }.start
-                      .flatTap(fib => ref.update(_ + (id -> fib.cancel)))
+      Resource
+        .make(IO.ref(Map.empty[String, (Unique.Token, IO[Unit])]))(_.get.flatMap(_.values.toList.traverse_ {
+          case (_, fa) => fa
+        }))
+        .map { ref =>
+          new CancellableTask {
+            def startFiber[A](t: Trace, id: String, task: IO[A]): IO[FiberIO[A]] =
+              t.trace(s"starting fiber $id, awaiting lock") {
+                IO.unique.flatMap { token =>
+                  IO.uncancelable { poll =>
+                    lck.lock.surround {
+                      ref
+                        .modify(m => (m + (id -> (token, IO.unit)), m.get(id).traverse_ { case (_, fa) => fa }))
+                        .flatten *>
+                        t.trace(s"got lock, starting fiber $id") {
+                          poll {
+                            task
+                              .onError(e => t.logger.logError(s"Fiber $id failed with $e"))
+                              .guarantee(ref.update { m =>
+                                m.get(id) match {
+                                  case Some((t, _)) if t == token => m - id
+                                  case _                          => m
+                                }
+                              })
+                          }
+                        }.start
+                          .flatTap(fib =>
+                            ref.update { m =>
+                              if (m.contains(id)) m + (id -> (token, fib.cancel))
+                              else m
+                            }
+                          )
+                    }
+                  }
                 }
               }
-            }
 
-          def cancel(t: Trace, id: String): IO[Unit] =
-            t.trace(s"cancelling $id, awaiting lock") {
-              lck.lock.surround {
-                t.trace(s"got lock, cancelling $id") {
-                  ref.get.flatMap(_.get(id).sequence_)
+            def cancel(t: Trace, id: String): IO[Unit] =
+              t.trace(s"cancelling $id, awaiting lock") {
+                lck.lock.surround {
+                  t.trace(s"got lock, cancelling $id") {
+                    ref.get.flatMap(_.get(id).traverse_ { case (_, fa) => fa })
+                  }
                 }
               }
-            }
+          }
         }
-      }
     }
   }
 }
