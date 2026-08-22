@@ -13,11 +13,13 @@
       url = "github:bazelbuild/rules_scala";
       flake = false;
     };
+    codex-cli-nix.url = "github:sadjow/codex-cli-nix";
   };
 
-  outputs = { flake-utils, self, nixpkgs, bazel-repo, rules-scala, ... }: 
+  outputs = { flake-utils, self, nixpkgs, bazel-repo, rules-scala, codex-cli-nix, ... }: 
   let
     system = flake-utils.lib.system.x86_64-linux;
+    codex = pkgs.callPackage ./nix/codex/package.nix {};
     pkgs = nixpkgs.legacyPackages.${system};
     lib = nixpkgs.lib;
     list = lib.lists;
@@ -82,6 +84,9 @@
         bazel-watcher
         fmtall
         gen-protobuf
+      ];
+      buildInputs = [
+        codex-cli-nix.packages.${system}.default
       ];
     };
   };
