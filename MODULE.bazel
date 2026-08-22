@@ -5,12 +5,12 @@ http_jar = use_repo_rule(
   "http_jar",
 )
 
-version = "release-v0.4.1"
+version = "release-v0.5.0"
 mezel_jar = http_jar(
     name = "mezel_binary",
     url = "https://github.com/valdemargr/mezel/releases/download/{}/{}".format(version, "mezel.jar"),
-    sha256 = "c75e73f1c2f42f605321ffba6a5065bb18621a9c630061e42e757d688a592254",
+    sha256 = "9d959dc7ffe53c42f5e7c1d56cb5cac5734ce4df0163ec8481b1013f21075ad9",
 )
 
 
-bazel_dep(name = "rules_scala", version = "release-v0.4.1"
+bazel_dep(name = "rules_scala", version = "release-v0.5.0"
