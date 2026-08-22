@@ -211,7 +211,7 @@ object BSPServerDeps {
       Supervisor[IO](await = false),
       Resource.eval(Cache.make),
       Resource.eval(BspCacheKeys.make),
-      Resource.eval(Channel.bounded[IO, Json](64)),
+      Resource.eval(Channel.unbounded[IO, Json]),
       Resource.pure(RequestLifecycle.make(ct)),
       Resource.eval(Catch.ioCatch),
       Resource.pure(ct)
