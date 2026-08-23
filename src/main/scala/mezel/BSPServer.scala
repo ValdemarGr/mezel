@@ -722,16 +722,23 @@ class BspServerOps(
                       val p2 = p.toString().replace(".diagnosticsproto", ".jar")
                       Files[IO]
                         .exists(Path(p2))
-                        .flatMap {
-                          // There's an output but no diagnostics file, assume everything went fine
-                          case true => IO.unit
-                          case false =>
+                        .flatMap { jarExists =>
+                          if (!success) {
+                            val previousDocuments = prevDiagnostics.get(buildIdent(label)).toList.flatten
+                            trace.logger.logWarn(
+                              s"failed target has no diagnostics proto: key=$key, proto=$p, jarExists=$jarExists, previousDocuments=$previousDocuments"
+                            )
+                          } else if (jarExists) {
+                            // There's an output but no diagnostics file, assume everything went fine
+                            IO.unit
+                          } else {
                             verbose.verbose {
                               trace.logger
                                 .logWarn(
                                   s"no diagnostics file for $label, this can cause a degraded experience or may just be a skipped build target, looked at \"${p}\""
                                 )
                             }
+                          }
                         }
                         .as(None)
                     case true =>
