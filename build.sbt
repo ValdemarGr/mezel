@@ -3,7 +3,7 @@
 ThisBuild / scalaVersion := "3.7.4"
 ThisBuild / organization := "io.github.valdemargr"
 
-ThisBuild / tlBaseVersion := "0.4"
+ThisBuild / tlBaseVersion := "0.5"
 ThisBuild / tlUntaggedAreSnapshots := false
 ThisBuild / tlSonatypeUseLegacyHost := true
 ThisBuild / tlFatalWarnings := false

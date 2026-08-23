@@ -91,21 +91,22 @@ class Tasks(
         }
   }
 
-  def diagnosticsFiles: IO[Seq[(Label, Path)]] = trace.trace("diagnosticsFiles") {
+  def diagnosticsFiles: IO[Seq[(ConfiguredTargetKey, Path)]] = trace.trace("diagnosticsFiles") {
     import dsl._
 
     api.aquery(union(mnemonic("Scalac")("..."))(mnemonic("FileWrite")("..."))).map { aq =>
       val ext = ActionQueryResultExtensions(aq)
       aq.actions.mapFilter { a =>
         val label = Label.parse(ext.targetMap(a.targetId))
+        val key = ConfiguredTargetKey(label, ext.configurationMap(a.configurationId).checksum)
         val outputs = a.primaryOutputId :: a.outputIds.toList
-        val res = outputs
+        outputs
           .collectFirstSome { id =>
             val p = ext.pathFrags(ext.arts(id))
             if (p.label.endsWith(".diagnosticsproto")) Some(ext.buildPath(p))
             else None
           }
-        res tupleLeft label
+          .map(key -> _)
       }
     }
   }

@@ -5,6 +5,8 @@ import io.circe._
 
 final case class Label private (val value: String)
 
+final case class ConfiguredTargetKey(label: Label, configuration: String)
+
 object Label {
   def unsafe(value: String): Label = new Label(value)
 

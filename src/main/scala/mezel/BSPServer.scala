@@ -73,6 +73,7 @@ final case class ActionQueryResultExtensions(
 ) {
   val inputMap = mutable.HashMap.from(aq.depSetOfFiles.map(x => x.id -> x.directArtifactIds))
   val targetMap = mutable.HashMap.from(aq.targets.map(x => x.id -> x.label))
+  val configurationMap = mutable.HashMap.from(aq.configuration.map(x => x.id -> x))
   val pathFrags = mutable.HashMap.from(aq.pathFragments.map(p => p.id -> p))
   val arts = mutable.HashMap.from(aq.artifacts.map(x => x.id -> x.pathFragmentId))
 
@@ -243,7 +244,7 @@ object BspState {
 final case class BspCacheKeys(
     derivedEnv: CacheKey[Map[String, String]],
     buildTargetCache: CacheKey[BuildTargetCache],
-    diagnosticsFiles: CacheKey[Map[Label, Path]],
+    diagnosticsFiles: CacheKey[Map[ConfiguredTargetKey, Path]],
     dependencyGraph: CacheKey[DependencyGraph],
     newRules: CacheKey[Boolean],
     buildTargetBundleCache: CacheKey[BuildTargetBundleCache]
@@ -253,7 +254,7 @@ object BspCacheKeys {
   def make: IO[BspCacheKeys] = (
     CacheKey.make[Map[String, String]],
     CacheKey.make[BuildTargetCache],
-    CacheKey.make[Map[Label, Path]],
+    CacheKey.make[Map[ConfiguredTargetKey, Path]],
     CacheKey.make[DependencyGraph],
     CacheKey.make[Boolean],
     CacheKey.make[BuildTargetBundleCache]
@@ -675,12 +676,14 @@ class BspServerOps(
                     comp <- x.payload.completed
                     id <- x.id
                     targetCompletedId <- id.id.targetCompleted
+                    configuration <- targetCompletedId.configuration
                     label <- Some(Label.parse(targetCompletedId.label)).filter(bspLabels.contains)
-                  } yield (label, comp.success)
+                  } yield (ConfiguredTargetKey(label, configuration.id), comp.success)
                 }
                 .evalFilter {
-                  case (label, true) => verbose.debug(trace.logger.logInfo(s"$label completed")) *> IO.pure(true)
-                  case (label, false) =>
+                  case (key, true) => verbose.debug(trace.logger.logInfo(s"${key.label} completed")) *> IO.pure(true)
+                  case (key, false) =>
+                    val label = key.label
                     verbose.debug(trace.logger.logInfo(s"$label failed")) *>
                       eliminatedRef.get.flatMap { eliminated =>
                         // we have not been eliminated, but we have failed
@@ -702,11 +705,13 @@ class BspServerOps(
                 }
             }
 
-          labelStream.parEvalMapUnorderedUnbounded { case (label, success) =>
+          labelStream.parEvalMapUnorderedUnbounded { case (key, success) =>
+            val label = key.label
+
             def readDiagnostics: IO[Option[diagnostics.TargetDiagnostics]] =
-              diagnosticsFiles.get(label) match {
+              diagnosticsFiles.get(key) match {
                 case None =>
-                  trace.logger.logInfo(s"no diagnostics file declared for $label, this is likely a bug").as(None)
+                  trace.logger.logInfo(s"no diagnostics file declared for $key, this is likely a bug").as(None)
                 case Some(x) =>
                   val p = execRoot / x
 
